@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {computed,onMounted,onUnmounted,ref} from 'vue'
+import Dropdown from './Dropdown.vue'
 type Policy={per_payment:string;task_budget:string;max_risk:number;preference:string}
 type Request={id:string;instruction:string;mode:string;policy:Policy}
 type Candidate={service:{id:string;name:string;pay_to:string;amount:string};level:number;eligible:boolean;reason:string;source:string;quote?:{amount:string};risk?:{toxicScore?:number;traits?:{name:string;description:string}[];duration_ms:number}}
@@ -131,11 +132,11 @@ onUnmounted(()=>clearInterval(timer))
    <section class="panel controls">
     <div class="section-title"><span class="step">01</span><div><h2>Define the boundaries</h2><p>Your authorization comes first.</p></div></div>
     <fieldset :disabled="active || !!pending">
-     <label>Execution mode<select v-model="mode" @change="onModeChange"><option value="simulate">Policy simulation · No payment</option><option value="preview">Live API preview · No payment</option><option value="pay">Live testnet execution · Pays automatically</option></select></label>
+     <label>Execution mode<Dropdown v-model="mode" @change="onModeChange" :options="[{value:'simulate',label:'Policy simulation · No payment'},{value:'preview',label:'Live API preview · No payment'},{value:'pay',label:'Live testnet execution · Pays automatically'}]" /></label>
      <div class="mode-note" :class="{simulation:mode==='simulate'}"><i></i><span v-if="mode==='simulate'">Simulated offers and risk. Real agent reasoning. No signature or payment.</span><span v-else-if="mode==='preview'">Real offers and Intercepta screening. Preview the decision without paying.</span><span v-else>Real screening and a Base Sepolia payment, within the policy below.</span></div>
      <div class="control-divider"><span>SPENDING LIMITS</span><span>USDC</span></div>
      <div class="row"><label>Per-payment cap<input v-model="policy.per_payment" inputmode="decimal" /></label><label>Total task budget<input v-model="policy.task_budget" inputmode="decimal" /></label></div>
-     <div class="row"><label>Allowed risk<select v-model.number="policy.max_risk"><option :value="0">Level 0 only</option><option v-if="mode==='simulate'" :value="1">Levels 0 + 1</option></select></label><label>Selection priority<select v-model="policy.preference"><option value="price">Lowest price first</option><option value="risk">Lowest risk first</option></select></label></div>
+     <div class="row"><label>Allowed risk<Dropdown v-model="policy.max_risk" :options="mode==='simulate'?[{value:0,label:'Level 0 only'},{value:1,label:'Levels 0 + 1'}]:[{value:0,label:'Level 0 only'}]" /></label><label>Selection priority<Dropdown v-model="policy.preference" :options="[{value:'price',label:'Lowest price first'},{value:'risk',label:'Lowest risk first'}]" /></label></div>
      <p class="hint">High risk is always blocked. Level 0 means no detected signal, not guaranteed safety. Demo cap: 0.10 USDC.</p>
      <div class="control-divider"><span>AGENT INSTRUCTION</span><span>↗</span></div>
      <label class="task-label">What should the agent do?<textarea v-model="instruction" rows="4" maxlength="2000"></textarea></label>
