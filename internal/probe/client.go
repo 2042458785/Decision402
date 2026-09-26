@@ -17,12 +17,19 @@ const endpoint = "https://api.web3antivirus.io/api/public/v2/extension/account/"
 const maxResponseBytes = 1 << 20
 
 type Client struct {
-	key  string
-	http *http.Client
+	key           string
+	http          *http.Client
+	lowRiskTraits map[string]struct{}
 }
 
-func NewClient(key string, timeout time.Duration) *Client {
-	return &Client{key: key, http: &http.Client{
+// lowRiskTraits are exact API trait names reviewed by the project owner.
+// An empty list keeps the live low-risk path disabled.
+func NewClient(key string, timeout time.Duration, lowRiskTraits ...string) *Client {
+	allowed := make(map[string]struct{}, len(lowRiskTraits))
+	for _, name := range lowRiskTraits {
+		allowed[name] = struct{}{}
+	}
+	return &Client{key: key, lowRiskTraits: allowed, http: &http.Client{
 		Timeout: timeout,
 		// Never forward the API key to a redirect destination.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },

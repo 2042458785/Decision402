@@ -1,22 +1,94 @@
-# Decision402 — 第一步：Intercepta API 调用验证 / Step 1: Intercepta Live API Probe
+# Decision402 — 用户授权下的 Agent 支付 / Policy-Constrained Agent Payments
+
+## 新版：直接运行 Agent 页面 / New: Run the Agent UI
+
+现已接入 **DeepSeek + Go 策略引擎 + Intercepta + x402 + Vue3 页面**。一个进程提供页面和四个本地演示服务，不再需要分别启动 serve。
+
+**DeepSeek, a Go policy engine, Intercepta, x402, and a Vue3 UI** are connected. A single process hosts the UI and four local demo services.
+
+```sh
+cd /Users/ddy/GolandProjects/Decision402/Decision402
+npm --prefix web ci
+npm --prefix web run build
+go run ./cmd/decision402
+```
+
+打开 **http://127.0.0.1:8080**。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入“帮我获取一份东京天气样例数据，按照页面设置的预算和风险规则选择服务。”先运行“真实 API 预览”（不付款），确认 A/B 被阻断、C 被选中，再运行“真实测试网执行”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
+
+Open **http://127.0.0.1:8080**. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
+
+完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选安全且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
+
+For bilingual instructions, architecture, and limitations, see the [Step 4 guide](docs/step4-agent.md) and [validation record](docs/step4-validation.md). **The live demo uses the verified binary path: risky A/B are blocked and the agent selects the affordable clean C. The level-1 price/risk trade-off remains explicitly simulated.**
+
+以下是仍可独立使用的扫描和 CLI 演示说明。
+
+The sections below document the standalone probe and CLI demos, which remain available.
+
 
 本 README 按章节提供中英对照。命令和代码示例共用一份。
 
 This README provides Chinese and English explanations in each section. Commands and code examples are shared.
 
-用 Go 分别扫描一个「预期正常」和一个「预期有风险」的主网地址，保存真实响应、字段、HTTP 状态和客户端耗时，为之后的 x402 签名前检查提供实际接口依据。
+现在 `pay` 会先检查报价，再真实调用 Intercepta 扫描报价里的 `payTo`，最后决定是否签名。`inspect` 仍然只看报价，不扫描、不付款。
 
-This Go tool scans two mainnet addresses: one expected to be normal and one expected to be risky. It records actual responses, JSON fields, HTTP status codes, and client-side elapsed time to inform a future x402 check before signing.
+`pay` now validates the quote, makes a live Intercepta call for its exact `payTo`, and decides whether signing may proceed. `inspect` only reads the offer; it neither scans nor pays.
 
-**当前阶段：调用程序与本地行为测试。真实正常／风险结论，必须等拿到 key、官方样例并完成实际调用后确认。** 本地测试使用合成响应，不是赞助商 API 调用证据。
+**已验证：**此前的 x402 测试网结算成功；2026-09-26 的真实扫描在 SDK 签名前钩子中得到正常样例 `allow`、风险样例 `deny`。本轮使用替代支付模块，没有签名或转账。**后续进度：**Agent 版本已完成带真实筛查的测试网结算，详见第四步验证记录。
 
-**Current stage: a request collection tool with local behavior tests. Actual normal/risky findings remain unconfirmed until a real key and sponsor-provided fixtures are used in live calls.** Local tests use synthetic responses and are not evidence of live sponsor API integration.
+**Verified:** an earlier x402 testnet payment settled; live scans on 2026-09-26 produced `allow` for the normal fixture and `deny` for the risk fixture inside the SDK pre-signing hook. This test used a replacement payment module, with no signatures or transfers. **Subsequent progress:** the Agent version completed a screened testnet settlement; see Step 4 validation.
+
+## 原有 CLI 操作 / Standalone CLI Usage
+
+在本仓库根目录执行。真实 key 放在 `.env`，不要放在 `.env.example`；后者会提交到 Git。`INTERCEPTA_ADDRESS_SOURCE` 填普通网址即可，不用 Markdown 链接格式。
+
+Run from the repository root. Keep the real key in `.env`, never in the tracked `.env.example`. Use a plain URL for `INTERCEPTA_ADDRESS_SOURCE`, without Markdown link formatting.
+
+```sh
+cd /Users/ddy/GolandProjects/Decision402/Decision402
+```
+
+**1. 不花测试币，先验证拦截。**下面会消耗两次真实 API 调用，通过 x402 SDK 检查正常放行、风险阻止；替代支付模块不读取钱包、不生成签名、不转账。
+
+**1. Test the gate without spending test tokens.** This uses two live API calls through the x402 SDK. A replacement payment module verifies allow/block behavior without wallet access, signatures, or transfers.
+
+```sh
+DECISION402_LIVE_TEST=1 go test ./cmd/x402-demo -run '^TestLiveInterceptaGate$' -v -count=1
+```
+
+预期看到 `action: allow`、`action: deny` 和 `PASS`。这是签名前检查证据，不是完整付款成功证据。
+
+Expect `action: allow`, `action: deny`, and `PASS`. This verifies the pre-signing gate, not a completed payment.
+
+**2. 正常地址付款。**终端 1 启动卖方并保持运行：
+
+**2. Pay the normal recipient.** Start the seller in terminal 1 and leave it running:
+
+```sh
+go run ./cmd/x402-demo -mode serve -pay-to 0x55eCFa861042bF2e5Ba9D1BDbF4C07D3C253B4a9
+```
+
+终端 2 付款。买方 `.buyer-key` 需已配置，钱包需有 Base Sepolia 测试 USDC。每次成功付款为 0.001 测试 USDC。
+
+Pay in terminal 2. Configure `.buyer-key` and fund that wallet with Base Sepolia test USDC. Each successful payment spends 0.001 test USDC.
+
+```sh
+go run ./cmd/x402-demo -mode pay -pay-to 0x55eCFa861042bF2e5Ba9D1BDbF4C07D3C253B4a9
+```
+
+验收：先出现 `allow`，再有 `HTTP 200`、`success=true` 和交易哈希。地址必须是你确认的收款地址；API 未发现风险不代表绝对安全。
+
+Acceptance: `allow`, then `HTTP 200`, `success=true`, and a transaction hash. Confirm ownership of the recipient yourself; an absence of detected risk is not a safety guarantee.
+
+**3. 风险阻断演示及字段解释：**见 [第三步操作说明](docs/step3-intercepta-gate.md)。
+
+**3. Risk-blocking demo and field explanations:** see the [Step 3 guide](docs/step3-intercepta-gate.md).
 
 ## 1. 领取并保存配置 / Obtain and Save Configuration
 
-从 [Intercepta 活动入口 / event page](https://intercepta.io/ethglobal) 领取 sandbox key。向展位工作人员或活动 Discord 索取一个正常主网地址和一个已知风险主网地址，并记录来源。文档里的示例地址不自动等于正常样例。
+从 [Intercepta 活动入口 / event page](https://intercepta.io/ethglobal) 领取 sandbox key。正常样例可用你自己控制的新地址；风险样例可用赞助商 Dashboard 或活动 Discord 提供的地址，并记录来源。文档里的示例地址不自动等于正常样例。
 
-Obtain a sandbox key from the event page. Ask the sponsor booth or event Discord for a normal mainnet address and a known-risk mainnet address, and record their source. An address shown in the documentation is not automatically a normal test fixture.
+Obtain a sandbox key from the event page. Use a newly created address you control as the expected-normal fixture; use the sponsor dashboard or event Discord for the known-risk fixture, and record their provenance. An address shown in the documentation is not automatically a normal test fixture.
 
 这个 Git 仓库当前位于外层 GoLand 目录的同名子目录。在包含本 README 的目录执行；其他电脑请替换为自己的仓库路径：
 
@@ -52,7 +124,7 @@ INTERCEPTA_ADDRESS_SOURCE=fixture_source_or_discord_message_url
 | 配置项 / Variable | 中文说明 | English explanation |
 | --- | --- | --- |
 | `INTERCEPTA_API_KEY` | 赞助商发给你的真实 key。 | The actual key issued by the sponsor. |
-| `INTERCEPTA_NORMAL_ADDRESS` | 赞助商提供的预期正常主网地址。 | A sponsor-provided mainnet address expected to be normal. |
+| `INTERCEPTA_NORMAL_ADDRESS` | 你自己控制的预期正常地址。 | An address you control, expected to have no risk signals. |
 | `INTERCEPTA_RISK_ADDRESS` | 赞助商提供的已知风险主网地址。 | A sponsor-provided mainnet address with known risk. |
 | `INTERCEPTA_ADDRESS_SOURCE` | 样例来源，例如展位工作人员或 Discord 消息链接。 | Fixture provenance, such as the sponsor booth or a Discord message URL. |
 
@@ -66,9 +138,9 @@ The `.env` parser supports blank lines, full-line `#` comments, `NAME=value`, an
 
 ## 2. 运行两次真实请求 / Run Two Live Requests
 
-需要 Go 1.23 或更新版本。只使用 Go 标准库，无需下载第三方依赖。
+整个仓库现在需要 Go 1.24 或更新版本，因为第二步使用官方 x402 Go SDK；第一步的扫描代码本身只使用标准库。Go 1.23.2 在 `GOTOOLCHAIN=auto` 下可能自动下载所需工具链。
 
-Requires Go 1.23 or later. The tool uses only the Go standard library; no third-party dependencies are needed.
+The repository now requires Go 1.24 or later because Step 2 uses the official x402 Go SDK. The Step 1 probe itself uses only the standard library. With Go 1.23.2, `GOTOOLCHAIN=auto` may download the required toolchain.
 
 ```sh
 go run ./cmd/intercepta-probe
@@ -151,23 +223,23 @@ A network failure may leave no response body file. If the output directory is no
 | --- | --- | --- |
 | GET endpoint and `X-API-KEY` | 官方接口文档明确，置信度高。 | Explicitly documented by the official API reference; high confidence. |
 | Local transport, recording and error handling | 自动测试通过只能确认被测试的程序行为。 | Passing local tests supports only the program behavior covered by those tests. |
-| Normal/risky fixture findings | 需要真实响应和字段含义，目前未确认。 | Requires live responses and confirmed field semantics; not yet established. |
-| Full sponsor prize eligibility | 本步骤不能支持，后续还要接入实际付款前的决策。 | This step alone does not establish eligibility; checks must later control an actual payment flow. |
+| Normal/risky fixture findings | 已观察到评分 0／100 和风险标签，置信度高，仅适用于本次样例。 | Scores 0/100 and risk traits were observed; high confidence for these samples only. |
+| Full sponsor prize eligibility | 未确认：仍需完整付款演示、Agent 流程及提交材料。 | Not established: full payment demo, agent workflow, and submission materials remain. |
 
 `normal` / `risk` 是你提供样例时的**预期标签**。程序从不把标签当作 API 结论，也不假设存在 `allow`、`deny` 或某个特定的 `riskGroup` 字段。
 
 `normal` / `risk` are **expected fixture labels supplied by you**. The program never treats them as API verdicts and does not assume that `allow`, `deny`, or a particular `riskGroup` field exists.
 
-`collection_complete=true` 仅表示收到两次完整的 2xx JSON 响应。`verdicts_confirmed` 始终为 false，`risk_interpretation` 为 `unreviewed`。拿到真实字段后，再设计经过验证的策略映射。HTTP 200、空对象或缺少风险字段均不能直接解释为安全。
+`collection_complete=true` 仅表示收到两次完整的 2xx JSON 响应。`verdicts_confirmed` 始终为 false，`risk_interpretation` 为 `unreviewed`。这是保留原始证据的工具；付款策略另见 `internal/probe/decision.go`。HTTP 200、空对象或缺少风险字段均不能直接解释为安全。
 
-`collection_complete=true` only means two complete 2xx JSON responses were received. `verdicts_confirmed` remains false and `risk_interpretation` remains `unreviewed`. Build a validated policy mapping after inspecting real fields. HTTP 200, an empty object, or missing risk fields must not automatically be interpreted as safe.
+`collection_complete=true` only means two complete 2xx JSON responses were received. `verdicts_confirmed` remains false and `risk_interpretation` remains `unreviewed`. This is the raw-evidence tool; payment policy is implemented separately in `internal/probe/decision.go`. HTTP 200, an empty object, or missing risk fields must not automatically be interpreted as safe.
 
 第一步完整验收 / Acceptance checklist for the complete first step:
 
-- [ ] 配置真实 key 和两个来源可追溯的主网地址。 / Configure a real key and two mainnet addresses with traceable provenance.
-- [ ] 实际执行两次请求，报告记录真实字段与耗时。 / Execute two live calls and record actual fields and elapsed time.
+- [x] 配置真实 key 和两个来源可追溯的主网地址。 / Configure a real key and two mainnet addresses with traceable provenance.
+- [x] 实际执行两次请求，报告记录真实字段与耗时。 / Execute two live calls and record actual fields and elapsed time.
 - [ ] 根据官方说明或工作人员回复确认风险与原因字段的含义。 / Confirm the meaning of risk and reason fields using official documentation or sponsor guidance.
-- [ ] 确认响应支持预期对照，否则换用官方确认的样例或继续排查。 / Verify that responses support the expected contrast; otherwise use sponsor-confirmed fixtures or investigate further.
+- [x] 确认响应支持预期对照，否则换用官方确认的样例或继续排查。 / Verify that responses support the expected contrast; otherwise use sponsor-confirmed fixtures or investigate further.
 
 这个端点没有文档列出的 `chainId` 请求参数，程序不自行添加。主网风险数据不能证明同地址在测试网的合约或资产安全。
 
@@ -181,17 +253,26 @@ All paths below are relative to the Git repository root containing this README.
 
 | 文件 / File | 中文说明 | English explanation |
 | --- | --- | --- |
-| `go.mod` | 声明 Go 模块名称及 Go 版本要求。目前只使用标准库。 | Declares the Go module and required Go version. Only the standard library is used. |
+| `go.mod` | 声明 Go 模块名称及 Go 版本要求。扫描代码使用标准库，付款代码依赖官方 x402 SDK。 | Declares the Go module and required Go version. The probe uses the standard library; payment uses the official x402 SDK. |
 | `.env.example` | 空白模板，列出 key、两个地址及来源配置。 | Blank template listing the key, two addresses, and fixture source. |
 | `.env` | 由模板复制得到的本地实际配置，不提交 Git。 | Local configuration copied from the template; excluded from Git. |
+| `.buyer-key` | 可选测试网付款使用的本地测试钱包私钥文件，不提交 Git。 | Optional local test-wallet private key file for testnet payment; excluded from Git. |
 | `.gitignore` | 忽略真实配置、运行报告、编译输出等本地文件。 | Excludes real configuration, run reports, build outputs, and other local files. |
 | `cmd/intercepta-probe/main.go` | 程序入口：解析参数、加载配置、启动扫描和处理退出码。 | Entry point: parses flags, loads configuration, starts scanning, and handles exit codes. |
+| `cmd/x402-demo/main.go` | 启动付费服务、查看 402 报价，或用测试钱包尝试付款。 | Starts the paid service, inspects a 402 offer, or attempts a test-wallet payment. |
+| `cmd/x402-demo/main_test.go` | 测试付款前报价检查及测试钱包文件权限。 | Tests pre-payment offer checks and test-wallet file permissions. |
 | `internal/probe/config.go` | 读取配置，检查 key、地址格式及两个地址是否重复。 | Loads configuration and checks the key, address format, and duplicate fixtures. |
 | `internal/probe/client.go` | **实际 API 调用位于 `Client.Scan`**，处理鉴权、超时、状态码、正文和 key 脱敏。 | **The actual API call is in `Client.Scan`**, which handles authentication, timeouts, status codes, response bodies, and key redaction. |
+| `internal/probe/decision.go` | 把真实风险字段转换为本项目的 allow / deny / hold 策略。 | Maps real risk fields to the project's allow / deny / hold policy. |
+| `cmd/x402-demo/gate.go` | 签名前检查报价、扫描同一 payTo、输出原因并控制是否继续。 | Validates the quote, scans the same payTo before signing, logs reasons, and gates continuation. |
+| `cmd/x402-demo/gate_test.go` | 验证 SDK 确实在生成授权前阻止；含可选真实 API 测试。 | Checks SDK abortion before authorization creation; includes opt-in live API tests. |
+| `internal/probe/decision_test.go` | 验证风险字段、异常响应及失败时暂停策略。 | Tests risk fields, invalid responses, and fail-closed behavior. |
+| `docs/step3-intercepta-gate.md` | 正常放行和风险阻断的操作步骤、策略与验证边界。 | Allow/block demo steps, policy, and validation limits. |
 | `internal/probe/report.go` | 安排两次扫描，列出实际 JSON 字段，并保存响应及汇总。 | Orchestrates both scans, inventories actual JSON fields, and saves responses and reports. |
 | `internal/probe/probe_test.go` | 使用本地 HTTP 服务和合成响应测试行为，不消耗 API 配额。 | Tests behavior with local HTTP servers and synthetic responses; consumes no API quota. |
 | `README.md` | 使用方法、文件职责、结果解读及当前功能边界。 | Usage instructions, file responsibilities, result interpretation, and current limitations. |
-| `docs/step1-validation.md` | 已通过的检查及尚未完成的真实 API 验证记录。 | Records completed checks and outstanding live API validation. |
+| `docs/step1-validation.md` | 第一步真实扫描结果与验证边界。 | Records live probe results and validation limits. |
+| `docs/step2-x402.md` | 第二步的简明操作说明和已验证／未验证状态。 | Short Step 2 instructions and observed/pending validation status. |
 
 主要调用流程 / Main call flow:
 
@@ -221,16 +302,16 @@ Tests cover the request path and authentication header, saving both results, lar
 
 ## 6. 提交时的 API 反馈 / API Feedback for Submission
 
-以下四项待真实调用后填写，尚不是实际体验。提交前替换为真实记录。
+以下反馈基于本次实际接入；未测量或未确认的事项如实标注。
 
-Complete the four items below after live calls. They are placeholders, not observed experience; replace them with real findings before submission.
+The feedback below reflects this integration. Unmeasured or unconfirmed items are explicitly marked.
 
-| 反馈 / Feedback | 中文：待填写 | English: to be completed |
+| 反馈 / Feedback | 中文 | English |
 | --- | --- | --- |
-| Time to first call | 从收到 key 到首次成功调用耗时：待实测。 | Time from receiving the key to the first successful call: not yet measured. |
-| Request observations | 两个样例的客户端耗时及 HTTP 状态：待实测，引用报告。 | Client-side duration and HTTP status for both fixtures: not yet measured; reference the report. |
-| Confusing behavior | 最困惑的字段／行为及工作人员解释：待记录。 | Confusing fields or behavior and the sponsor's explanation: to be recorded. |
-| Missing information | 缺少的文档／能力或具体建议：待记录，没有则如实填写。 | Missing documentation, capabilities, or specific suggestions: to be recorded; state honestly if none. |
+| Time to first call | 从收到 key 到首次成功调用的开发耗时未记录。 | Development time from receiving the key to the first successful call was not recorded. |
+| Request observations | 本轮两个样例均 HTTP 200，耗时约 1.82 秒／3.15 秒，见第三步记录。 | Both returned HTTP 200, taking about 1.82s / 3.15s in this run; see Step 3 evidence. |
+| Confusing behavior | 主网风险数据与测试网支付的关系容易混淆；quick-scan 未列出 chainId 参数，逐链覆盖范围仍需确认。 | Mainnet risk data versus testnet payment was confusing; quick-scan lists no chainId parameter, and per-chain coverage needs clarification. |
+| Missing information | 建议提供带 toxicScore / traits 的完整响应样例，以及超时、字段缺失时的处理建议。 | Suggested additions: complete toxicScore / traits response examples and guidance for timeouts and missing fields. |
 
 原始报告默认被 Git 忽略。分享前检查内容，选取需要公开的证据。后续前端使用 TypeScript + Vue 3，合约如需要使用 Solidity；当前步骤是 Go 命令行接入验证。
 
@@ -242,3 +323,5 @@ Raw reports are excluded from Git by default. Review them before sharing and sel
 - [Quick Scan Address — 地址快速扫描](https://docs.web3antivirus.io/reference/quick-scan-address)
 - [Getting Started — 接入指南](https://docs.web3antivirus.io/reference/getting-started-1)
 - [ETHGlobal Tokyo: Intercepta — 赞助商奖项要求](https://ethglobal.com/events/tokyo2026/prizes/intercepta)
+
+开发辅助披露 / Development assistance: [AI 使用说明](docs/ai-assistance.md).

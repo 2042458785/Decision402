@@ -36,9 +36,9 @@ go run ./cmd/x402-demo -mode inspect
 
 Expect **HTTP 402** with `network: eip155:84532`, USDC, `amount: 1000`, and `payTo`. The amount is in USDC's smallest units: **0.001 USDC**. Check that `payTo` matches the address from step 1. **Inspect only reads the offer; it does not sign or pay.**
 
-这条 402 报价已在 2026-09-26 JST 用官方 x402 Go SDK 实际跑出；它证明报价流程，尚未证明支付成功。
+这条 402 报价已在 2026-09-26 JST 用官方 x402 Go SDK 实际跑出；单独一条报价不能证明付款成功。后续 Agent 版本已完成测试网付款，见[第四步验证记录](step4-validation.md)。
 
-We observed this 402 offer with the official x402 Go SDK on 2026-09-26 JST. It verifies the offer flow, not a completed payment.
+We observed this 402 offer with the official x402 Go SDK on 2026-09-26 JST. An offer alone does not establish payment; the subsequent Agent payment is documented in [Step 4 validation](step4-validation.md).
 
 ## 3. 可选：测试网付款 / Optional: Make a Testnet Payment
 
@@ -51,21 +51,15 @@ chmod 600 .buyer-key
 go run ./cmd/x402-demo -mode pay -pay-to 0x1111111111111111111111111111111111111111
 ```
 
-把 `-pay-to` 换成第一步相同的收款地址。购买端会在签名前检查网络、代币、收款地址和金额。只有看到 **HTTP 200、成功结算回执和交易哈希**，才能说测试网付款跑通。`.buyer-key` 已被 `.gitignore` 忽略，不要提交或发送给别人。
+把 `-pay-to` 换成第一步相同的收款地址。购买端会在签名前检查网络、代币、收款地址和金额，并使用 `.env` 中的 API key 调用 Intercepta；请先完成配置。只有看到 **HTTP 200、成功结算回执和交易哈希**，才能说测试网付款跑通。`.buyer-key` 已被 `.gitignore` 忽略，不要提交或发送给别人。
 
-Replace `-pay-to` with the same receiving address used in step 1. Before signing, the buyer checks the network, token, recipient, and amount. Only **HTTP 200, a successful settlement receipt, and a transaction hash** establish that the testnet payment completed. `.buyer-key` is excluded by `.gitignore`; do not commit or share it.
+Replace `-pay-to` with the same receiving address used in step 1. Before signing, the buyer checks the network, token, recipient, and amount, then calls Intercepta using the API key in `.env`; configure it first. Only **HTTP 200, a successful settlement receipt, and a transaction hash** establish that the testnet payment completed. `.buyer-key` is excluded by `.gitignore`; do not commit or share it.
 
 ## 现在的进度与下一步 / Current Status and Next Action
 
-| 项目 / Item | 中文状态 | English status |
-| --- | --- | --- |
-| x402 报价 / Offer | 已实测 HTTP 402。 | HTTP 402 was observed. |
-| 测试网支付 / Testnet payment | 尚未执行，需要测试钱包和测试 USDC。 | Not run; requires a test wallet and test USDC. |
-| Intercepta 风险检查 / Risk check | 尚未接入付款流程，需要真实 API key 和官方测试地址。 | Not yet connected to payment; requires a real API key and sponsor fixtures. |
+此前已完成一次真实 Base Sepolia 测试 USDC 结算。现已加入 Intercepta 签名前检查：正常／风险真实扫描已通过 SDK 钩子测试，新版本完整付款仍待实测。接下来按照[第三步操作说明](step3-intercepta-gate.md)演示放行和阻断。
 
-拿到 Intercepta key 和官方样例后，先运行第一步的地址扫描，再根据真实返回字段，把检查接到**签名前**，展示一笔放行和一笔阻断。目前的报价检查不能代替 Intercepta 风险检查。
-
-After receiving the Intercepta key and fixtures, run the Step 1 address scans. Use the actual response fields to connect screening **before signing**, then demonstrate one payment allowed and one blocked. The current offer checks do not replace Intercepta screening.
+An earlier Base Sepolia test-USDC payment settled successfully. Live Intercepta scans pass allow/block tests in the pre-signing SDK hook. The Agent version completed a screened testnet payment; this standalone CLI mode has not been rerun with the integration. Follow the [Step 3 guide](step3-intercepta-gate.md) next.
 
 项目使用官方 x402 Go SDK，需要 Go 1.24 或更新版本。本机 Go 1.23.2 在 `GOTOOLCHAIN=auto` 下可能自动下载适用工具链。
 

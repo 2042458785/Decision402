@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"Decision402/internal/probe"
+
 	x402 "github.com/x402-foundation/x402/go/v2"
 	x402http "github.com/x402-foundation/x402/go/v2/http"
 	nethttpmw "github.com/x402-foundation/x402/go/v2/http/nethttp"
@@ -127,13 +129,11 @@ func request(rawURL, expectedPayTo, keyFile string) error {
 			return errors.New("test wallet key is invalid")
 		}
 		client := x402.Newx402Client(x402.WithSpendControls(x402.SpendControls{MaxAmountPerPayment: priceUSD}))
-		client.OnBeforePaymentCreation(func(ctx x402.PaymentCreationContext) (*x402.BeforePaymentCreationHookResult, error) {
-			if err := checkOffer(ctx.SelectedRequirements, expectedPayTo); err != nil {
-				return &x402.BeforePaymentCreationHookResult{Abort: true, Reason: err.Error()}, nil
-			}
-			log.Printf("local testnet offer checks passed for payTo=%s; Intercepta has not screened this payment", expectedPayTo)
-			return nil, nil
-		})
+		cfg, err := probe.LoadConfig(".env")
+		if err != nil {
+			return fmt.Errorf("Intercepta configuration: %w", err)
+		}
+		client.OnBeforePaymentCreation(paymentGate(probe.NewClient(cfg.APIKey, 15*time.Second), expectedPayTo))
 		client.Register(x402.Network(baseSepolia), buyerEVM.NewExactEvmScheme(signer, nil))
 		protocolClient := x402http.Newx402HTTPClient(client)
 		getSettlement = func(h http.Header) (*x402.SettleResponse, error) {

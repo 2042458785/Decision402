@@ -1,22 +1,17 @@
-# Step 1 validation status
+# 第一步验证记录 / Step 1 Validation
 
-Implementation scope: two sequential Intercepta Quick Scan Address requests, response preservation, actual JSON field inventory and client-side elapsed time.
+2026-09-26：已实际调用 Intercepta Quick Scan Address，两个样例均返回 HTTP 200。
 
-## Observed
+2026-09-26: both live Intercepta Quick Scan Address calls returned HTTP 200.
 
-- Local toolchain: Go 1.23.2, darwin/amd64.
-- `go test ./...`: passed. Tests use local HTTP servers and synthetic fixtures, not Intercepta.
-- `go vet ./...`: passed.
-- Production request origin and authentication header match the official Quick Scan Address documentation.
+- Normal: `toxicScore=0`, `traits=[]`; 2636.62 ms.
+- Risk: `toxicScore=100`, traits `known_scammer`, `attack_money_target`; 2278.02 ms.
+- Local evidence: `artifacts/intercepta-20260926T063336Z-1570998528/`.
 
-## Not yet observed
+以上是单次响应证据。零分不代表绝对安全，风险标签是供应商的判断；未测量从拿到 key 到首次接通的开发耗时，也未证明所有链或所有风险均可识别。
 
-- A successful authenticated call to Intercepta.
-- A real normal-address response or a real risky-address response.
-- The provider's actual response schema, risk semantics, or production latency.
+These are individual observed responses. Zero does not guarantee safety, and risk labels are vendor assessments. Development time from receiving the key to the first successful call was not measured; coverage of all chains or risks was not established.
 
-The user has not yet received the sandbox key and sponsor fixtures. No live-call result or API feedback has been fabricated. Local tests establish confidence in the tested collection and failure behavior, not in the provider's risk detection.
+原始 probe 保留字段，不自动下结论。付款策略和后续验证见[第三步](step3-intercepta-gate.md)。
 
-## Next evidence
-
-Fill `.env` with the key, two distinct sponsor-provided mainnet addresses and fixture source. Run `go run ./cmd/intercepta-probe`. Inspect the generated `report.json` and original response files with the sponsor's field definitions before implementing allow/block decisions.
+The raw probe records fields without interpreting verdicts. See [Step 3](step3-intercepta-gate.md) for payment policy and subsequent validation.
