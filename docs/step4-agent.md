@@ -47,7 +47,7 @@ Model calls consume DeepSeek API credit. The USDC budget controls this task's x4
 ## 界面怎么用 / Use the UI
 
 1. 设置单次上限、任务总预算、允许的风险等级、价格或风险优先。
-2. 输入：“帮我获取东京天气样例，按我的策略选择服务。”
+2. 输入英文任务：“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”
 3. 选择模式后点击运行。查看候选表、选中服务、Agent 解释和执行记录。
 
 1. Set the per-payment cap, task budget, maximum accepted risk, and price/risk preference.
@@ -56,13 +56,13 @@ Model calls consume DeepSeek API credit. The USDC budget controls this task's x4
 
 ## 比赛主演示 / Main judging demo
 
-1. 设置单次上限 `0.10`、任务预算 `0.10` USDC；只允许风险等级 `0`，选择“价格优先”。输入：“帮我获取一份东京天气样例数据，按照页面设置的预算和风险规则选择服务。”
-2. 先选“真实 API 预览”。预期看到 A/B 的风险分数与原因，C/D 符合授权，后端说明“过滤：A/B 风险阻断；C/D 符合授权。筛选：价格优先，选择 C（0.01 USDC）”。这一步没有签名或付款；若真实结果不同，先核查原因。
-3. 再选“真实测试网执行”并新建任务。展示签名前的 `final_risk`、最终结算状态、Base Sepolia 交易哈希和静态样例数据。A/B 不会收到付款。四个端点属于同一本地样例程序，不是四家独立供应商。
+1. 设置单次上限 `0.10`、任务预算 `0.10` USDC；只允许风险等级 `0`，选择页面上的“Lowest price first”。输入英文任务：“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”
+2. 先选“Live API preview · No payment”。预期看到 A/B 的风险分数与原因，C/D 符合授权，后端说明“Screening: A/B blocked for risk; C/D eligible. Selection: price first; chose C (0.01 USDC).”这一步没有签名或付款；若真实结果不同，先核查原因。
+3. 再选“Live testnet execution · Pays automatically”并新建任务。展示签名前的 `final_risk`、最终结算状态、Base Sepolia 交易哈希和静态样例数据。A/B 不会收到付款。四个端点属于同一本地样例程序，不是四家独立供应商。
 
 1. Set both caps to `0.10` USDC, accept only level `0`, select price-first, and request the Tokyo sample weather dataset under the page policy.
-2. Run Live API Preview. Show A/B's risk scores and reasons, C/D as eligible, and the backend explanation selecting C at `0.01` USDC. This step never signs or pays; investigate any different live result.
-3. Run Testnet Execution as a new task. Show `final_risk`, settlement status, the Base Sepolia transaction hash, and static sample data. A/B never receive payment. All four endpoints belong to one local demo program, not independent vendors.
+2. Run “Live API preview · No payment”. Show A/B's risk scores and reasons, C/D as eligible, and the backend explanation selecting C at `0.01` USDC. This step never signs or pays; investigate any different live result.
+3. Run “Live testnet execution · Pays automatically” as a new task. Show `final_risk`, settlement status, the Base Sepolia transaction hash, and static sample data. A/B never receive payment. All four endpoints belong to one local demo program, not independent vendors.
 
 | 模式 / Mode | 真实使用的能力 / Live components | 是否付款 / Payment |
 | --- | --- | --- |

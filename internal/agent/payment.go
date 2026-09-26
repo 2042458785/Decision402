@@ -29,23 +29,23 @@ func Quote(ctx context.Context, s Service) (*types.PaymentRequirements, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", s.URL, nil)
 	resp, err := noRedirectClient(20 * time.Second).Do(req)
 	if err != nil {
-		return nil, errors.New("无法获取服务报价")
+		return nil, errors.New("Could not fetch the service offer")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 402 {
-		return nil, errors.New("服务未返回 HTTP 402")
+		return nil, errors.New("Service did not return HTTP 402")
 	}
 	encoded := resp.Header.Get("PAYMENT-REQUIRED")
 	if len(encoded) > 64000 {
-		return nil, errors.New("报价过大")
+		return nil, errors.New("Offer is too large")
 	}
 	b, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, errors.New("报价编码无效")
+		return nil, errors.New("Offer encoding is invalid")
 	}
 	var offer types.PaymentRequired
 	if json.Unmarshal(b, &offer) != nil || offer.X402Version != 2 || len(offer.Accepts) != 1 {
-		return nil, errors.New("报价格式或方案数量不符")
+		return nil, errors.New("Offer format or number of payment options is invalid")
 	}
 	q := offer.Accepts[0]
 	if err := CheckQuote(q, s); err != nil {
@@ -91,15 +91,15 @@ func Pay(ctx context.Context, c Candidate, p Policy, keyFile string, scan interf
 	fail := func(msg string) PaymentOutcome { outcome.Error = msg; return outcome }
 	info, err := os.Stat(keyFile)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return fail("测试钱包文件不存在或权限不是 600")
+		return fail("Test wallet file is missing or its permissions are not 600")
 	}
 	b, err := os.ReadFile(keyFile)
 	if err != nil {
-		return fail("无法读取测试钱包")
+		return fail("Could not read the test wallet")
 	}
 	signer, err := signers.NewClientSignerFromPrivateKey(strings.TrimSpace(string(b)))
 	if err != nil {
-		return fail("测试钱包私钥格式错误")
+		return fail("Test wallet private key is invalid")
 	}
 	client := x402.Newx402Client(x402.WithSpendControls(x402.SpendControls{MaxAmountPerPayment: "$" + p.PerPayment}))
 	consumed := false
@@ -108,32 +108,32 @@ func Pay(ctx context.Context, c Candidate, p Policy, keyFile string, scan interf
 			return &x402.BeforePaymentCreationHookResult{Abort: true, Reason: msg}, nil
 		}
 		if consumed {
-			return abort("本任务已使用付款机会，禁止重试")
+			return abort("This task already used its payment attempt; retry blocked")
 		}
 		q, ok := pc.SelectedRequirements.(types.PaymentRequirements)
 		if !ok {
-			return abort("非预期报价版本")
+			return abort("Unexpected offer version")
 		}
 		if CheckQuote(q, c.Service) != nil || c.Quote == nil || !reflect.DeepEqual(q, *c.Quote) {
-			return abort("最终报价改变，停止付款")
+			return abort("Final offer changed; payment stopped")
 		}
 		d := scan.Screen(pc.Ctx, q.PayTo)
 		emit("final_risk", d)
 		if d.Action != "allow" || (d.Level != 0 && d.Level != 1) || d.ToxicScore == nil || *d.ToxicScore != 0 || !strings.EqualFold(d.Address, q.PayTo) || (d.Level == 0 && len(d.Traits) != 0) || (d.Level == 1 && len(d.Traits) == 0) {
-			return abort("最终风险检查未通过")
+			return abort("Final risk check failed")
 		}
 		selected := c
 		selected.Level = d.Level
 		selected.Quote = &q
 		_, winner := Rank(p, []Candidate{selected})
 		if winner == nil {
-			return abort("最终报价超过用户授权")
+			return abort("Final offer exceeds the owner's authorization")
 		}
 		if pc.Ctx.Err() != nil {
-			return abort("任务已超时")
+			return abort("Task timed out")
 		}
 		if err := beforeSign(); err != nil {
-			return abort("无法持久记录付款授权，停止")
+			return abort("Could not durably record payment authorization; stopped")
 		}
 		consumed = true
 		return nil, nil
@@ -145,19 +145,19 @@ func Pay(ctx context.Context, c Candidate, p Policy, keyFile string, scan interf
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.Service.URL, nil)
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fail("付款请求中止；查看最终检查。若已生成授权，结算状态未知，不自动重试")
+		return fail("Payment request failed; inspect the final check. If authorization was signed, settlement is unknown and will not be retried automatically")
 	}
 	defer resp.Body.Close()
 	// Verify settlement before reading data: response-body failure must not hide payment.
 	settlement, err := protocol.GetPaymentSettleResponse(map[string]string{"PAYMENT-RESPONSE": resp.Header.Get("PAYMENT-RESPONSE")})
 	if err != nil || settlement == nil || !settlement.Success || settlement.Network != Network || settlement.Transaction == "" || !outcome.Signed {
-		return fail("未确认有效结算回执；不自动重试")
+		return fail("No valid settlement receipt confirmed; no automatic retry")
 	}
 	outcome.Settled = true
 	outcome.Transaction = settlement.Transaction
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
 	if err != nil || len(data) > 65536 || !json.Valid(data) || resp.StatusCode != 200 {
-		return fail("付款已结算，但服务数据读取失败；不能再次付款")
+		return fail("Payment settled, but service data could not be read; do not pay again")
 	}
 	outcome.Data = data
 	return outcome

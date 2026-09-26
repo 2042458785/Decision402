@@ -14,7 +14,7 @@ func TestSelectionSummaryExplainsRealDemo(t *testing.T) {
 		{Service: Service{ID: "D"}, Level: 0, Quote: testQuote("50000")},
 	})
 	got := selectionSummary(p, candidates, selected)
-	want := "过滤：A/B 风险阻断；C/D 符合授权。筛选：价格优先，选择 C（0.01 USDC）。"
+	want := "Screening: A/B blocked for risk; C/D eligible. Selection: price first; chose C (0.01 USDC)."
 	if got != want {
 		t.Fatalf("summary=%q, want %q", got, want)
 	}
@@ -26,7 +26,7 @@ func TestSelectionSummaryShowsNoEligibleService(t *testing.T) {
 		{Service: Service{ID: "A"}, Level: 2, Quote: testQuote("5000")},
 		{Service: Service{ID: "C"}, Level: 0, Quote: testQuote("10000")},
 	})
-	if selected != nil || !strings.Contains(selectionSummary(p, candidates, selected), "没有合格服务") {
+	if selected != nil || !strings.Contains(selectionSummary(p, candidates, selected), "no eligible service") {
 		t.Fatalf("expected no eligible service, got %+v", selected)
 	}
 }

@@ -13,13 +13,13 @@ npm --prefix web run build
 go run ./cmd/decision402
 ```
 
-打开 **http://127.0.0.1:8080**。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入“帮我获取一份东京天气样例数据，按照页面设置的预算和风险规则选择服务。”先运行“真实 API 预览”（不付款），确认 A/B 被阻断、C 被选中，再运行“真实测试网执行”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
+打开 **http://127.0.0.1:8080**。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入英文任务“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”先运行“Live API preview · No payment”，确认 A/B 被阻断、C 被选中，再运行“Live testnet execution · Pays automatically”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
 
 Open **http://127.0.0.1:8080**. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
 
-完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选安全且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
+现场可照读的中英双语讲稿：[Decision402 演示讲稿](docs/demo-script-bilingual.md)。完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选本次扫描未检出风险且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
 
-For bilingual instructions, architecture, and limitations, see the [Step 4 guide](docs/step4-agent.md) and [validation record](docs/step4-validation.md). **The live demo uses the verified binary path: risky A/B are blocked and the agent selects the affordable clean C. The level-1 price/risk trade-off remains explicitly simulated.**
+For bilingual instructions, architecture, and limitations, see the [Step 4 guide](docs/step4-agent.md) and [validation record](docs/step4-validation.md). **The live demo uses the verified binary path: risky A/B are blocked and the agent selects affordable C after no risk signal is detected. The level-1 price/risk trade-off remains explicitly simulated.**
 
 以下是仍可独立使用的扫描和 CLI 演示说明。
 

@@ -189,7 +189,7 @@ func TestAgentLoopSimulationAndDuplicateExecute(t *testing.T) {
 	a.tasks[request.ID] = &Task{Request: request, Status: "queued"}
 	a.run(request)
 	task := a.tasks[request.ID]
-	if task.Status != "previewed" || task.Selected.Service.ID != "C" || task.PaymentAttempted || scanner.calls != 0 || !strings.Contains(task.Summary, "策略模拟") || !strings.Contains(task.Summary, "过滤：") || requests.Load() != 2 {
+	if task.Status != "previewed" || task.Selected.Service.ID != "C" || task.PaymentAttempted || scanner.calls != 0 || !strings.Contains(task.Summary, "Policy simulation") || !strings.Contains(task.Summary, "Screening:") || requests.Load() != 2 {
 		t.Fatalf("unexpected simulated execution %+v", task)
 	}
 	count := 0

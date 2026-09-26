@@ -24,25 +24,25 @@ func selectionSummary(p Policy, candidates []Candidate, selected *Candidate) str
 	}
 	var filters []string
 	if len(blocked) > 0 {
-		filters = append(filters, strings.Join(blocked, "/")+" 风险阻断")
+		filters = append(filters, strings.Join(blocked, "/")+" blocked for risk")
 	}
 	if len(held) > 0 {
-		filters = append(filters, strings.Join(held, "/")+" 信息不足暂停")
+		filters = append(filters, strings.Join(held, "/")+" held for missing risk data")
 	}
 	if len(excluded) > 0 {
-		filters = append(filters, strings.Join(excluded, "/")+" 超出授权或预算")
+		filters = append(filters, strings.Join(excluded, "/")+" outside policy or budget")
 	}
 	if len(eligible) > 0 {
-		filters = append(filters, strings.Join(eligible, "/")+" 符合授权")
+		filters = append(filters, strings.Join(eligible, "/")+" eligible")
 	}
 	if selected == nil || selected.Quote == nil {
-		return "过滤：" + strings.Join(filters, "；") + "。筛选：没有合格服务。"
+		return "Screening: " + strings.Join(filters, "; ") + ". Selection: no eligible service."
 	}
 	amount, _ := strconv.ParseInt(selected.Quote.Amount, 10, 64)
 	price := strings.TrimRight(strings.TrimRight(FormatMoney(amount), "0"), ".")
-	preference := "价格优先"
+	preference := "price first"
 	if p.Preference == "risk" {
-		preference = "风险优先，同等级比较价格"
+		preference = "risk first; price breaks ties"
 	}
-	return fmt.Sprintf("过滤：%s。筛选：%s，选择 %s（%s USDC）。", strings.Join(filters, "；"), preference, selected.Service.ID, price)
+	return fmt.Sprintf("Screening: %s. Selection: %s; chose %s (%s USDC).", strings.Join(filters, "; "), preference, selected.Service.ID, price)
 }

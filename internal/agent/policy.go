@@ -22,7 +22,7 @@ var moneyPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.[0-9]{1,6})?$`)
 // Money never uses floating point. All payment arithmetic uses micro-USDC.
 func Money(s string) (int64, error) {
 	if len(s) > 16 || !moneyPattern.MatchString(s) {
-		return 0, errors.New("金额必须是最多六位小数的正数字符串")
+		return 0, errors.New("Amount must be a positive decimal string with at most six fractional digits")
 	}
 	parts := strings.SplitN(s, ".", 2)
 	fraction := ""
@@ -45,13 +45,13 @@ func (p Policy) Validate() error {
 	single, e1 := Money(p.PerPayment)
 	total, e2 := Money(p.TaskBudget)
 	if e1 != nil || e2 != nil || single <= 0 || total <= 0 || single > MaxDemoAtomic || total > MaxDemoAtomic {
-		return errors.New("本地演示：单次和任务预算均需大于 0，且不超过 0.10 USDC")
+		return errors.New("Local demo: per-payment and task budgets must be above zero and at most 0.10 USDC")
 	}
 	if p.MaxRisk != 0 && p.MaxRisk != 1 {
-		return errors.New("仅允许风险偏好 0 或 1；高风险永远排除")
+		return errors.New("Only risk levels 0 and 1 can be authorized; high risk is always blocked")
 	}
 	if p.Preference != "price" && p.Preference != "risk" {
-		return errors.New("偏好必须为 price 或 risk")
+		return errors.New("Priority must be price or risk")
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
 		c.Eligible = false
 		if c.Quote == nil {
 			if c.Reason == "" {
-				c.Reason = "没有有效报价"
+				c.Reason = "No valid offer"
 			}
 			continue
 		}
@@ -90,19 +90,19 @@ func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
 		switch {
 		case c.Level < 0:
 			if c.Reason == "" {
-				c.Reason = "风险信息未知，暂停"
+				c.Reason = "Risk information unavailable; payment on hold"
 			}
 		case c.Level >= 2:
 			if c.Reason == "" {
-				c.Reason = "项目策略阻断，强制排除"
+				c.Reason = "Blocked by project policy"
 			}
 		case c.Level > p.MaxRisk:
-			c.Reason = "超过用户允许的风险等级"
+			c.Reason = "Exceeds the owner's accepted risk level"
 		case err != nil || amount <= 0 || amount > single || amount > total:
-			c.Reason = "超过单次或任务预算，或金额无效"
+			c.Reason = "Exceeds the per-payment or task budget, or has an invalid amount"
 		default:
 			c.Eligible = true
-			c.Reason = "满足预算与风险授权"
+			c.Reason = "Within the authorized budget and risk level"
 		}
 	}
 	options := []Candidate{}
@@ -131,29 +131,29 @@ func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
 	}
 	winner := options[0]
 	if p.Preference == "price" {
-		winner.Reason = "在符合授权的服务中价格最低，同价时风险优先"
+		winner.Reason = "Lowest-priced eligible service; risk breaks price ties"
 	} else {
-		winner.Reason = "在符合授权的服务中风险最低，同等级时价格优先"
+		winner.Reason = "Lowest-risk eligible service; price breaks risk ties"
 	}
 	return out, &winner
 }
 
 func CheckQuote(q types.PaymentRequirements, s Service) error {
 	if q.Scheme != "exact" || q.Network != Network || !strings.EqualFold(q.Asset, Asset) || !strings.EqualFold(q.PayTo, s.PayTo) || !addressPattern.MatchString(q.PayTo) {
-		return errors.New("报价网络、代币、方案或收款人不匹配")
+		return errors.New("Offer network, token, scheme, or recipient does not match")
 	}
 	n, err := strconv.ParseInt(q.Amount, 10, 64)
 	if err != nil || n <= 0 || n > MaxDemoAtomic || q.Amount != s.Amount {
-		return errors.New("报价金额改变或超出演示上限")
+		return errors.New("Offer amount changed or exceeds the demo cap")
 	}
 	if q.MaxTimeoutSeconds <= 0 || q.MaxTimeoutSeconds > 300 {
-		return errors.New("授权有效期超出范围")
+		return errors.New("Authorization timeout is out of range")
 	}
 	if q.Extra["name"] != "USDC" || q.Extra["version"] != "2" {
-		return errors.New("USDC 签名域不匹配")
+		return errors.New("USDC signing domain does not match")
 	}
 	if m, ok := q.Extra["assetTransferMethod"]; ok && m != "eip3009" && m != "" {
-		return errors.New("不支持的支付授权方式")
+		return errors.New("Unsupported payment authorization method")
 	}
 	return nil
 }

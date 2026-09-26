@@ -47,21 +47,21 @@ func (m *Model) Complete(ctx context.Context, messages []Message) (Message, erro
 	body, _ := json.Marshal(map[string]any{"model": m.Name, "messages": messages, "tools": agentTools, "max_tokens": 900, "temperature": 0, "thinking": map[string]string{"type": "disabled"}})
 	req, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return Message{}, errors.New("模型请求构造失败")
+		return Message{}, errors.New("Could not construct the model request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+m.Key)
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
-		return Message{}, errors.New("模型请求失败或超时；未自动重试")
+		return Message{}, errors.New("Model request failed or timed out; no automatic retry")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return Message{}, fmt.Errorf("DeepSeek HTTP %d；检查 key、余额和模型配置", resp.StatusCode)
+		return Message{}, fmt.Errorf("DeepSeek HTTP %d; check the API key, credits, and model configuration", resp.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Message{}, errors.New("读取模型响应失败")
+		return Message{}, errors.New("Could not read the model response")
 	}
 	var result struct {
 		Choices []struct {
@@ -69,7 +69,7 @@ func (m *Model) Complete(ctx context.Context, messages []Message) (Message, erro
 		} `json:"choices"`
 	}
 	if json.Unmarshal(b, &result) != nil || len(result.Choices) != 1 {
-		return Message{}, errors.New("模型响应格式不符")
+		return Message{}, errors.New("Model response format is invalid")
 	}
 	return result.Choices[0].Message, nil
 }
