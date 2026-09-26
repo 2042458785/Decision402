@@ -67,7 +67,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 /* ── masthead ──────────────────────────────────────────────────────────── */
 
 .topbar {
-  height: 92px;
+  height: 70px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -76,17 +76,24 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 /* The name is the mark. A glyph beside a wordmark asks the reader to parse two
    things that say the same thing, so the wordmark is given the whole band and
    set at the height of it. */
+/* The masthead is a label, not a second headline. At 52px it was competing
+   with the hero — two pieces of large type stacked — and its weight made it
+   the densest thing on a page that is otherwise light. Set small and tight, it
+   names the page and then gets out of the way. */
 .brand {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   text-decoration: none;
-  font-size: 52px;
+  font-size: 25px;
   font-weight: 500;
-  letter-spacing: -0.055em;
+  letter-spacing: -0.045em;
   line-height: 1;
+  color: var(--ink);
 }
 .brand-mark { display: none; }
 .brand small { display: none; }
+/* The accent belongs to the one number in the name, the same violet that
+   marks a decision everywhere else. */
 .brand-number { color: var(--accent); font-weight: 400; }
 .header-right { display: flex; align-items: center; gap: 22px; }
 .connection, .network {
@@ -274,14 +281,6 @@ main {
 .section-title p {
   font-size: 13px; color: var(--grey); margin: 5px 0 0; line-height: 1.5;
 }
-.step {
-  display: grid; place-items: center; flex-shrink: 0;
-  width: 27px; height: 27px;
-  border: 1px solid var(--rule);
-  background: var(--paper);
-  font: 400 11px var(--mono);
-  color: var(--grey);
-}
 
 /* ── the controls ──────────────────────────────────────────────────────── */
 
@@ -463,7 +462,6 @@ textarea { resize: vertical; font-size: 14px; line-height: 1.65; min-height: 108
   padding: 12px 6px;
   transition: color 0.3s var(--ease), background 0.3s var(--ease);
 }
-.flow-strip > div + div { border-left: 1px solid var(--rule); }
 .flow-strip span { font-size: 11px; }
 .flow-strip .done { color: var(--ink); background: var(--card); }
 .flow-strip .done span { color: var(--accent); }
@@ -887,13 +885,15 @@ footer {
   margin-bottom: 24px;
   gap: 0;
 }
+/* Each stage is its own box. The border used to be drawn only between
+   siblings, so the first cell had no left wall — four boxes, three walls. */
 .flow-strip > div {
   display: flex; align-items: center; gap: 11px;
-  padding: 0 14px 0 0;
-  border: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hair);
   font-size: 14px;
   color: var(--faint);
-  transition: color 0.35s var(--ease);
+  transition: color 0.35s var(--ease), border-color 0.35s var(--ease), background 0.35s var(--ease);
   min-width: 0;
 }
 .flow-strip b { white-space: nowrap; }
@@ -902,12 +902,12 @@ footer {
 
 /* the marker: numbered while waiting, ticked once landed */
 .flow-orb {
-  width: 30px; height: 30px; flex: none;
+  width: 18px; height: 18px; flex: none;
   display: grid; place-items: center;
   border: 1px solid var(--rule);
   background: var(--card);
-  font-family: var(--mono); font-size: 11px;
-  color: var(--faint);
+  font-size: 10px;
+  color: transparent;
   transition:
     background 0.35s var(--ease),
     border-color 0.35s var(--ease),
@@ -916,7 +916,7 @@ footer {
 
 .flow-strip > div.done { color: var(--ink); }
 .flow-strip > div.done .flow-orb {
-  background: var(--ink); border-color: var(--ink); color: var(--paper);
+  background: var(--ok); border-color: var(--ok); color: #fff;
   animation: orb-land 0.42s var(--ease) both;
 }
 /* the step actually working: the only place on the page that pulses */
@@ -1553,4 +1553,133 @@ body:after {
   .onboard-card:nth-of-type(1),
   .onboard-card:nth-of-type(2),
   .onboard-card:nth-of-type(3) { grid-column: 1; grid-row: auto; }
+}
+
+/* ── the headline ───────────────────────────────────────────────────────────
+   The two lines were the same grey, which made the pair read as one flat
+   block. The first line is the claim and the second is the condition on it, so
+   the first carries the ink and the second the accent — the same violet that
+   marks a policy everywhere else on the page. */
+
+h1 .line-two { color: var(--accent); opacity: 0.75; }
+.drag-word {
+  display: inline-block;
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  will-change: transform;
+  transition: transform 0.35s var(--ease);
+}
+.drag-word.dragging {
+  cursor: grabbing;
+  /* the word settles into each notch rather than tracking the pointer exactly,
+     which is what gives the drag its ratchet */
+  transition: transform 0.09s var(--ease);
+}
+/* Nothing in the headline may be selected while the word is being dragged —
+   without this the second line highlights as the pointer sweeps across it. */
+h1:has(.drag-word.dragging) *,
+.drag-word.dragging {
+  user-select: none;
+  -webkit-user-select: none;
+}
+h1 { -webkit-user-select: none; user-select: none; }
+
+/* ── the circle that rolls with the page ────────────────────────────────────
+   Once the page scrolls past it, the circle leaves its column and travels the
+   viewport edge: right along the top, then down the right-hand side, turning
+   as it goes. Its position is read from the scroll offset rather than played
+   as an animation, so scrolling back up runs it backwards exactly.
+
+   It is decoration and nothing depends on it, so it takes no pointer events
+   and is hidden entirely for anyone who asked for reduced motion. */
+
+.roller {
+  position: fixed;
+  left: 0; top: 0;
+  z-index: 3;
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  background: #dfeee4;
+  pointer-events: none;
+  will-change: transform, left, top;
+}
+/* the small inner circle, which is what makes the turning visible */
+.roller:after {
+  content: "";
+  position: absolute;
+  left: 58%; top: 50%;
+  width: 92px; height: 92px;
+  border-radius: 50%;
+  background: #c8e2d2;
+  transform: translateY(-50%);
+}
+/* while it is away, its place in the column is left empty rather than
+   duplicated */
+.onboard-shape.circle.away { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .roller { display: none; }
+  .onboard-shape.circle.away { opacity: 1; }
+}
+
+/* ── the decision, arriving in order ────────────────────────────────────────
+   The page used to show a spinner and then the whole verdict at once, which
+   gives a reader nothing to follow and no sense of what was checked. Each
+   recipient now appears as it is quoted, sits visibly under check, and then
+   lands on its verdict — so the story is watched rather than reported. */
+
+.candidate {
+  animation: row-in 0.42s var(--ease) both;
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+/* under check: the row is present but has not concluded */
+.candidate.screening {
+  border-color: var(--hair);
+  background: linear-gradient(90deg, var(--card), var(--paper) 50%, var(--card));
+  background-size: 200% 100%;
+  animation: row-in 0.42s var(--ease) both, sweep 1.5s linear infinite;
+}
+@keyframes sweep {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.risk-badge.checking { color: var(--faint); }
+.risk-badge.checking > i { animation: pulse-dot 1.2s ease-in-out infinite; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+
+/* landed: the verdict arrives with a short flash so it is seen changing */
+.candidate.settled .risk-badge { animation: verdict-in 0.5s var(--ease) both; }
+@keyframes verdict-in {
+  0%   { opacity: 0; transform: translateX(-6px); }
+  100% { opacity: 1; transform: none; }
+}
+.candidate.settled .quote-price { animation: verdict-in 0.5s 0.05s var(--ease) both; }
+.candidate.settled .outcome { animation: verdict-in 0.5s 0.1s var(--ease) both; }
+
+/* the chosen one is marked last of all, after every row has concluded */
+.candidate.chosen {
+  animation: row-in 0.42s var(--ease) both, chosen-land 0.6s 0.35s var(--ease) both;
+}
+@keyframes chosen-land {
+  0%   { box-shadow: 0 0 0 0 #6550cf00; }
+  40%  { box-shadow: 0 0 0 6px #6550cf1f; }
+  100% { box-shadow: 3px 3px 0 #e6e1f8; }
+}
+
+/* a blocked recipient is the point of the product, so it is marked too */
+.candidate.rejected .risk-badge.high {
+  animation: verdict-in 0.5s var(--ease) both, flag 0.7s 0.3s var(--ease);
+}
+@keyframes flag {
+  0%, 100% { transform: none; }
+  30%      { transform: translateX(-3px); }
+  60%      { transform: translateX(3px); }
 }

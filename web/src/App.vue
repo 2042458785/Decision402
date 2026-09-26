@@ -58,6 +58,90 @@ const displaySummary=computed(()=>{
 const eligibleCount=computed(()=>task.value?.candidates.filter(c=>c.eligible).length??0)
 const excludedCount=computed(()=>task.value?.candidates.filter(c=>!c.eligible).length??0)
 const taskModeLabel=computed(()=>task.value?.request.mode==='simulate'?'SIMULATED INPUTS':task.value?.request.mode==='preview'?'LIVE API · NO PAYMENT':'TESTNET EXECUTION')
+// The green circle leaves its column when the page scrolls past it: it runs
+// along the top edge to the right, hits the wall, then rolls down it, turning
+// as it goes. Its position is computed from the scroll offset rather than
+// played as an animation, so scrolling back up runs it backwards exactly.
+//
+// It picks up from exactly where it sits in its column rather than from the
+// left of the screen — otherwise it teleports across the page the moment it
+// detaches, because its column is on the right.
+const SIZE=200
+const rolling=ref(false)
+const rollX=ref(0)
+const rollY=ref(0)
+const rollSpin=ref(0)
+let rollAnchor:HTMLElement|null=null
+function onScroll(){
+ if(!rollAnchor)rollAnchor=document.querySelector('.onboard-shape.circle')
+ if(!rollAnchor){rolling.value=false;return}
+ const box=rollAnchor.getBoundingClientRect()
+ const past=-box.top
+ if(past<=0){rolling.value=false;rollSpin.value=0;return}
+ rolling.value=true
+ // The element is a full-width box with the circle drawn centred inside it,
+ // so its left edge is well left of the circle itself. Measuring the box made
+ // the roller jump leftwards the moment it appeared; this is where the circle
+ // actually is.
+ const startX=box.left+(box.width-SIZE)/2
+ const acrossDistance=Math.max(0,window.innerWidth-SIZE-startX)
+ const downDistance=Math.max(1,window.innerHeight-SIZE)
+ const across=Math.min(acrossDistance,past)
+ const down=Math.min(downDistance,Math.max(0,past-acrossDistance))
+ rollX.value=startX+across
+ rollY.value=down
+ // one turn per circumference, so it reads as rolling rather than sliding
+ rollSpin.value=((across+down)/(Math.PI*SIZE))*360
+}
+
+// The headline's first word can be pushed along its line, from where it starts
+// to the right edge of the page's own content.
+//
+// It moves in steps rather than freely: each step lands with a short tick, so
+// dragging it has a detent you can feel rather than being a smooth slide. The
+// tick is the Vibration API where a device has one — on a desktop it is simply
+// the stepping itself, which is what gives it the ratchet.
+const dragWord=ref<HTMLElement|null>(null)
+const wordX=ref(0)
+const dragging=ref(false)
+const STEP=26
+let dragFrom=0,dragStartX=0,dragMax=0,lastNotch=0
+function startDrag(e:PointerEvent){
+ const el=dragWord.value
+ if(!el)return
+ const shell=el.closest('.shell') as HTMLElement|null
+ if(!shell)return
+ e.preventDefault()   // a drag is not a text selection
+ const shellBox=shell.getBoundingClientRect()
+ const pad=parseFloat(getComputedStyle(shell).paddingRight||'0')
+ dragMax=Math.max(0,(shellBox.right-pad)-el.getBoundingClientRect().right+wordX.value)
+ dragging.value=true
+ dragFrom=wordX.value
+ dragStartX=e.clientX
+ lastNotch=Math.round(wordX.value/STEP)
+ el.setPointerCapture(e.pointerId)
+ const move=(ev:PointerEvent)=>{
+  ev.preventDefault()
+  const raw=Math.min(dragMax,Math.max(0,dragFrom+(ev.clientX-dragStartX)))
+  const notch=Math.round(raw/STEP)
+  const snapped=Math.min(dragMax,notch*STEP)
+  if(notch!==lastNotch){
+   lastNotch=notch
+   navigator.vibrate?.(8)
+  }
+  wordX.value=snapped
+ }
+ const up=(ev:PointerEvent)=>{
+  dragging.value=false
+  el.releasePointerCapture?.(ev.pointerId)
+  el.removeEventListener('pointermove',move)
+  el.removeEventListener('pointerup',up)
+  el.removeEventListener('pointercancel',up)
+ }
+ el.addEventListener('pointermove',move)
+ el.addEventListener('pointerup',up)
+ el.addEventListener('pointercancel',up)
+}
 const shortAddress=(value:string)=>value.slice(0,6)+'…'+value.slice(-4)
 const traitLabel=(value:string)=>value.replace(/_/g,' ')
 // A step that is merely 'not done' cannot be told apart from one that never
@@ -201,7 +285,10 @@ onMounted(async()=>{
   const id=new URLSearchParams(location.search).get('task')??localStorage.getItem('decision402-last');if(id && owner.value){await getTask(id);if(task.value){policy.value={...task.value.request.policy,max_risk:task.value.request.mode==='simulate'?task.value.request.policy.max_risk:0};mode.value=task.value.request.mode;instruction.value=task.value.request.instruction;agentID.value=task.value.request.agent_id??agentID.value}if(['queued','running'].includes(task.value?.status??''))watchTask(id)}
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed'}finally{initializing.value=false}
 })
-onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('accountsChanged',walletChanged)})
+// The roller reads the scroll position directly; passive, because it never
+// prevents the scroll it is following.
+onMounted(()=>{window.addEventListener('scroll',onScroll,{passive:true});window.addEventListener('resize',onScroll);onScroll()})
+onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('accountsChanged',walletChanged);window.removeEventListener('scroll',onScroll);window.removeEventListener('resize',onScroll)})
 </script>
 
 <template>
@@ -215,7 +302,12 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
   </header>
 
   <section class="intro wide">
-   <div class="intro-copy"><div class="eyebrow"><span></span>YOUR POLICY. AGENT ACTION.</div><h1><Scramble text="Autonomy." :tail="5" :delay="260" /><br><span><Scramble text="Within bounds." :tail="7" :delay="620" /></span></h1></div>
+   <div class="intro-copy"><div class="eyebrow"><span></span>YOUR POLICY. AGENT ACTION.</div><h1>
+     <span class="drag-word" ref="dragWord" :style="{transform:'translateX('+wordX+'px)'}"
+       @pointerdown="startDrag" @dragstart.prevent @selectstart.prevent :class="{dragging:dragging}"
+       title="Drag me"><Scramble text="Autonomy." :tail="5" :delay="260" /></span>
+     <br><span class="line-two"><Scramble text="Within bounds." :tail="7" :delay="620" /></span>
+    </h1></div>
    </section>
 
   <section class="onboarding" aria-label="Set up your agent wallet">
@@ -223,7 +315,7 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
    <div class="onboard-grid">
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':'Create agent + wallet'}} ↗</button></div></div>
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div><div class="onboard-shape circle" aria-hidden="true"></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div><div class="onboard-shape circle" :class="{away:rolling}" aria-hidden="true"></div></div>
    </div>
    <p v-if="walletError" class="error" role="alert">{{walletError}}</p>
    <p class="onboard-disclaimer">Local testnet prototype. The backend keeps the agent wallet key in a private local file; back up <code>artifacts/agents/</code> before moving or deleting this workspace. Never fund it with mainnet assets.</p>
@@ -246,7 +338,7 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
   <div class="workspace-heading"><div><span class="eyebrow">PAYMENT WORKSPACE</span><p>From an instruction to an accountable decision.</p></div><div class="workspace-actions"><span class="workspace-note">Mainnet risk data <span>↔</span> Testnet settlement</span><button class="new-task" :disabled="!canStartFresh" @click="newTask"><span aria-hidden="true">+</span> New task</button></div></div>
   <main>
    <section class="panel controls">
-    <div class="section-title"><span class="step">01</span><div><h2>Define the boundaries</h2><p>Your authorization comes first.</p></div></div>
+    <div class="section-title"><div><h2>Define the boundaries</h2><p>Your authorization comes first.</p></div></div>
     <fieldset :disabled="active || !!pending">
      <div class="mode-picker">
       <span class="tiny-label">EXECUTION MODE</span>
@@ -279,25 +371,30 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
 
    <section class="results">
     <div class="panel decision-panel">
-     <div class="section-title"><span class="step">02</span><div><h2>The moment of decision</h2><p>{{task?(active?'Execution in progress':'Recorded task result'):'Watch your policy become action.'}}</p></div><span class="status" :class="task?.status" role="status">{{task?statusNames[task.status]:'Ready when you are'}}</span></div>
-     <div class="flow-strip"><div v-for="(item,index) in flowSteps" :key="item.label" :class="{done:item.done,working:item.active}"><span class="flow-orb">{{item.done?'✓':String(index+1).padStart(2,'0')}}</span><b>{{item.label}}</b></div></div>
+     <div class="section-title"><div><h2>The moment of decision</h2><p>{{task?(active?'Execution in progress':'Recorded task result'):'Watch your policy become action.'}}</p></div><span class="status" :class="task?.status" role="status">{{task?statusNames[task.status]:'Ready when you are'}}</span></div>
+     <div class="flow-strip"><div v-for="(item,index) in flowSteps" :key="item.label" :class="{done:item.done,working:item.active}"><span class="flow-orb">{{item.done?'✓':''}}</span><b>{{item.label}}</b></div></div>
      <template v-if="task">
       <div class="run-policy"><span class="run-mode">{{taskModeLabel}}</span><span>≤ {{task.request.policy.per_payment}} / payment</span><span>≤ {{task.request.policy.task_budget}} total</span><span>Risk ≤ {{task.request.policy.max_risk}}</span><span>{{task.request.policy.preference==='price'?'Price first':'Risk first'}}</span></div>
       <div v-if="task.candidates.length" class="decision-metrics"><div><strong>{{task.candidates.length}}</strong><span>offers evaluated</span></div><div><strong class="metric-blocked">{{excludedCount}}</strong><span>excluded by policy</span></div><div><strong class="metric-eligible">{{eligibleCount}}</strong><span>eligible options</span></div></div>
       <div v-if="task.candidates.length" class="candidate-list">
        <div class="candidate-head"><span>SERVICE / RECIPIENT</span><span>PRICE · USDC</span><span>RISK CHECK</span><span>DECISION</span></div>
-       <article v-for="c in task.candidates" :key="c.service.id" class="candidate" :class="{chosen:task.selected?.service.id===c.service.id,rejected:!c.eligible}">
+       <article v-for="(c,ci) in task.candidates" :key="c.service.id" class="candidate"
+        :style="{animationDelay:(ci*110)+'ms'}"
+        :class="{chosen:task.selected?.service.id===c.service.id,
+                 rejected:!!c.risk&&!c.eligible,
+                 screening:!c.risk,
+                 settled:!!c.risk}">
         <div class="candidate-row">
          <div class="provider"><span class="provider-avatar">{{c.service.id}}</span><div><b>Provider {{c.service.id}}</b><small>{{shortAddress(c.service.pay_to)}}</small></div></div>
          <div class="quote-price">{{money(c.quote?.amount??c.service.amount)}}</div>
-         <div class="risk-cell"><span class="risk-badge" :class="c.level<0?'unknown':c.level>=2?'high':c.level===1?'advisory':'clear'"><i></i>{{c.level<0?'Unknown':c.level>=2?'Blocked':c.level===1?'Advisory':'No signal'}}</span><small>{{c.risk?.toxicScore!==undefined?'Score '+c.risk.toxicScore+'/100':'Level '+c.level+(task.request.mode==='simulate'?' · simulated':'')}}</small></div>
+         <div class="risk-cell"><span class="risk-badge" :class="!c.risk?'checking':c.level<0?'unknown':c.level>=2?'high':c.level===1?'advisory':'clear'"><i></i>{{!c.risk?'Checking':c.level<0?'Unknown':c.level>=2?'Blocked':c.level===1?'Advisory':'No signal'}}</span><small>{{c.risk?.toxicScore!==undefined?'Score '+c.risk.toxicScore+'/100':'Level '+c.level+(task.request.mode==='simulate'?' · simulated':'')}}</small></div>
          <div class="outcome"><span :class="c.eligible?'allow':'deny'">{{task.selected?.service.id===c.service.id?'✓ Selected':c.eligible?'Eligible':'× Excluded'}}</span></div>
         </div>
         <div class="candidate-reason"><span class="reason-mark">{{c.eligible?'↳':'⊘'}}</span><span>{{displayReason(c)}}</span></div>
         <details v-if="c.risk?.traits?.length" class="risk-details"><summary><span v-for="trait in c.risk.traits" :key="trait.name" class="trait-tag">{{traitLabel(trait.name)}}</span><span class="detail-link">View risk evidence ↗</span></summary><p v-for="trait in c.risk.traits" :key="trait.name">{{trait.description}}</p></details>
        </article>
       </div>
-      <div v-else class="empty loading-state"><span class="orbit" aria-hidden="true"></span><h3>Following your instruction.</h3><p>Waiting for the agent and service screening.</p></div>
+      <div v-else class="empty loading-state"><span class="orbit" aria-hidden="true"></span><h3>Asking each provider to quote.</h3><p>Every recipient becomes known here, and not before.</p></div>
       <div v-if="task.summary" class="answer" :class="{hasSelection:!!task.selected}"><div class="answer-top"><span>DECISION EXPLAINED</span><span>FILTER → RANK → EXECUTE</span></div><div v-if="task.selected" class="selection-headline"><span>Provider {{task.selected.service.id}}</span><b>{{money(task.selected.quote?.amount??task.selected.service.amount)}} <small>USDC</small></b></div><p>{{displaySummary}}</p></div>
       <p v-if="task.error" class="error" role="alert">{{task.error}}</p>
       <div v-if="task.payment" class="receipt" :class="{unconfirmed:!task.payment.settled}">
@@ -309,12 +406,14 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
      <div v-else class="empty welcome-state"><div class="empty-art" aria-hidden="true"><span class="empty-ring"></span><span class="empty-core">↗</span><i class="satellite one">✓</i><i class="satellite two">×</i></div><div class="eyebrow">AUTONOMY WITH PERMISSION</div><h3>A clear reason for every payment.</h3><p>Set your limits and give the agent a task.<br>See which services qualify, which are blocked,<br>and why your policy chooses the next step.</p><div class="empty-legend"><span><i></i>Risk screening</span><span><i></i>Budget enforcement</span><span><i></i>Pre-signing check</span></div></div>
     </div>
     <div class="panel timeline">
-     <div class="section-title"><span class="step">03</span><div><h2>Execution trail</h2><p>The evidence behind the decision.</p></div><span class="event-count">{{task?.events.length??0}} EVENTS</span></div>
+     <div class="section-title"><div><h2>Execution trail</h2><p>The evidence behind the decision.</p></div><span class="event-count">{{task?.events.length??0}} EVENTS</span></div>
      <div v-if="!task?.events.length" class="trail-empty"><span>↳</span>Agent calls, risk checks, and payment records will appear here.</div>
      <details v-for="(e,i) in task?.events??[]" :key="i" class="event"><summary><span class="event-index">{{String(i+1).padStart(2,'0')}}</span><span class="event-name">{{eventNames[e.kind]??e.kind}}</span><time>{{e.time.slice(11,19)}}</time><span class="event-expand">+</span></summary><pre>{{JSON.stringify(e.data,null,2)}}</pre></details>
     </div>
    </section>
   </main>
-  <footer><a href="/" class="footer-brand">Decision402<span>Designed for delegated decisions.</span></a><span>Local prototype · Model has no private key · Static sample data</span></footer>
+  <div v-show="rolling" class="roller" aria-hidden="true"
+    :style="{transform:'translate3d('+rollX+'px,'+rollY+'px,0) rotate('+rollSpin+'deg)'}"></div>
+   <footer><a href="/" class="footer-brand">Decision402<span>Designed for delegated decisions.</span></a><span>Local prototype · Model has no private key · Static sample data</span></footer>
  </div>
 </template>
