@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed,onMounted,onUnmounted,ref} from 'vue'
 import Dropdown from './Dropdown.vue'
+import Scramble from './Scramble.vue'
 type Policy={per_payment:string;task_budget:string;max_risk:number;preference:string}
 type Request={id:string;agent_id:string;instruction:string;mode:string;policy:Policy}
 type Agent={id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string}
@@ -59,12 +60,19 @@ const excludedCount=computed(()=>task.value?.candidates.filter(c=>!c.eligible).l
 const taskModeLabel=computed(()=>task.value?.request.mode==='simulate'?'SIMULATED INPUTS':task.value?.request.mode==='preview'?'LIVE API · NO PAYMENT':'TESTNET EXECUTION')
 const shortAddress=(value:string)=>value.slice(0,6)+'…'+value.slice(-4)
 const traitLabel=(value:string)=>value.replace(/_/g,' ')
-const flowSteps=computed(()=>[
- {label:'Discover',done:!!task.value?.candidates.length},
- {label:'Screen',done:!!task.value?.candidates.length},
- {label:'Select',done:!!task.value?.selected},
- {label:'Settle',done:!!task.value?.payment?.settled},
-])
+// A step that is merely 'not done' cannot be told apart from one that never
+// started, so the sequence could never show anything working. The first step
+// that is not done, while the task is still running, is the one in progress.
+const flowSteps=computed(()=>{
+ const steps=[
+  {label:'Discover',done:!!task.value?.candidates.length,active:false},
+  {label:'Screen',done:!!task.value?.candidates.some(c=>c.risk),active:false},
+  {label:'Select',done:!!task.value?.selected,active:false},
+  {label:'Settle',done:task.value?.request.mode==='pay'?!!task.value?.payment?.settled:!!task.value?.selected,active:false},
+ ]
+ if(active.value){const next=steps.find(s=>!s.done);if(next)next.active=true}
+ return steps
+})
 const canStartFresh=computed(()=>!initializing.value&&!active.value&&!pending.value&&!(task.value?.payment_attempted&&!task.value?.payment?.settled))
 const apiHeaders={'Content-Type':'application/json','X-Decision402':'local-ui'}
 function provider():EthereumProvider { if(!window.ethereum)throw new Error('Install or enable MetaMask in this browser');return window.ethereum }
@@ -206,48 +214,62 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
    <div class="header-right"><span class="connection"><i :class="{online:!!config}"></i>{{owner?shortAddress(owner):config?'Connect owner wallet':'Connecting'}}</span><span class="network"><i></i>Base Sepolia <b>TESTNET</b></span></div>
   </header>
 
-  <section class="intro">
-   <div class="intro-copy"><div class="eyebrow"><span></span>YOUR POLICY. AGENT ACTION.</div><h1>Autonomy.<br><span>Within bounds.</span></h1><p>Let your agent find the right service.<br>Keep every payment inside your rules.</p></div>
-   <div class="architecture" aria-label="Task intent passes through the owner's policy before payment authorization">
-    <div class="architecture-top"><span>THE AUTHORIZATION BOUNDARY</span><span class="tiny-cross">+</span></div>
-    <div class="architecture-flow">
-     <div class="arch-node"><span class="node-icon">↗</span><b>Agent intent</b><small>Understand the task</small></div>
-     <span class="arch-line"></span>
-     <div class="arch-node policy-node"><span class="node-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5h14v14H5zM9 1v8M15 1v8M9 15v8M15 15v8M1 9h8M15 9h8M1 15h8M15 15h8" stroke="currentColor" stroke-width="1.5"/></svg></span><b>Your policy</b><small>Screen · filter · rank</small></div>
-     <span class="arch-line"></span>
-     <div class="arch-node"><span class="node-icon">✓</span><b>Payment</b><small>Recheck before signing</small></div>
-    </div>
-    <div class="architecture-bottom"><span><i></i>Owner-authorized execution</span><span>x402</span></div>
-   </div>
-  </section>
+  <section class="intro wide">
+   <div class="intro-copy"><div class="eyebrow"><span></span>YOUR POLICY. AGENT ACTION.</div><h1><Scramble text="Autonomy." :tail="5" :delay="260" /><br><span><Scramble text="Within bounds." :tail="7" :delay="620" /></span></h1></div>
+   </section>
 
   <section class="onboarding" aria-label="Set up your agent wallet">
    <div class="onboard-title"><span class="eyebrow">YOUR AGENT WORKSPACE</span><h2>Give an agent its own wallet.</h2><p>Connect an owner wallet, create an agent, and fund its Base Sepolia test USDC wallet. Your agent pays only after the policy and risk checks pass.</p></div>
    <div class="onboard-grid">
-    <div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code></div>
-    <div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':'Create agent + wallet'}} ↗</button></div>
-    <div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<select v-model="agentID" @change="chooseAgent"><option v-for="agent in agents" :key="agent.id" :value="agent.id">{{agent.name}} · {{shortAddress(agent.wallet)}}</option></select></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':'Create agent + wallet'}} ↗</button></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div><div class="onboard-shape circle" aria-hidden="true"></div></div>
    </div>
    <p v-if="walletError" class="error" role="alert">{{walletError}}</p>
    <p class="onboard-disclaimer">Local testnet prototype. The backend keeps the agent wallet key in a private local file; back up <code>artifacts/agents/</code> before moving or deleting this workspace. Never fund it with mainnet assets.</p>
+  </section>
+  <section class="ask">
+   <form class="ask-field" @submit.prevent="start">
+    <input v-model="instruction" maxlength="2000" :disabled="active || !!pending"
+      placeholder="What should the agent buy?" aria-label="What should the agent buy" />
+    <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment">
+     <span>{{active?'Working':pending?'Retry':mode==='pay'?'Authorize payment':'Send'}}</span>
+     <i :class="{spinner:active}" aria-hidden="true">{{active?'':'→'}}</i>
+    </button>
+   </form>
+   <div class="ask-meta">
+    <span v-if="!selectedAgent" class="ask-need">Create an agent below before sending a task.</span>
+    <span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
+    <span class="ask-mode">{{mode==='simulate'?'POLICY SIMULATION':mode==='preview'?'LIVE PREVIEW · NO PAYMENT':'TESTNET EXECUTION'}}</span>
+   </div>
   </section>
   <div class="workspace-heading"><div><span class="eyebrow">PAYMENT WORKSPACE</span><p>From an instruction to an accountable decision.</p></div><div class="workspace-actions"><span class="workspace-note">Mainnet risk data <span>↔</span> Testnet settlement</span><button class="new-task" :disabled="!canStartFresh" @click="newTask"><span aria-hidden="true">+</span> New task</button></div></div>
   <main>
    <section class="panel controls">
     <div class="section-title"><span class="step">01</span><div><h2>Define the boundaries</h2><p>Your authorization comes first.</p></div></div>
     <fieldset :disabled="active || !!pending">
-     <label>Execution mode<Dropdown v-model="mode" @change="onModeChange" :options="[{value:'simulate',label:'Policy simulation · No payment'},{value:'preview',label:'Live API preview · No payment'},{value:'pay',label:'Live testnet execution · Pays automatically'}]" /></label>
-     <div class="mode-note" :class="{simulation:mode==='simulate'}"><i></i><span v-if="mode==='simulate'">Simulated offers and risk. Real agent reasoning. No signature or payment.</span><span v-else-if="mode==='preview'">Real offers and Intercepta screening. Preview the decision without paying.</span><span v-else>Real screening and a Base Sepolia payment, within the policy below.</span></div>
+     <div class="mode-picker">
+      <span class="tiny-label">EXECUTION MODE</span>
+      <div class="modes">
+       <label v-for="m in [
+         {id:'simulate',name:'Policy simulation',note:'Simulated offers and risk',spend:'No payment'},
+         {id:'preview',name:'Live API preview',note:'Real quotes, real screening',spend:'No payment'},
+         {id:'pay',name:'Testnet execution',note:'Signs and settles on Base Sepolia',spend:'Spends test USDC'}
+       ]" :key="m.id" :class="[mode===m.id?'picked':'', m.id==='pay'?'is-pay':'']">
+        <input type="radio" name="mode" :value="m.id" v-model="mode" @change="onModeChange" />
+        <b>{{m.name}}</b>
+        <small>{{m.note}}</small>
+        <em>{{m.spend}}</em>
+       </label>
+      </div>
+     </div>
      <div class="control-divider"><span>SPENDING LIMITS</span><span>USDC</span></div>
      <div class="row"><label>Per-payment cap<input v-model="policy.per_payment" inputmode="decimal" /></label><label>Total task budget<input v-model="policy.task_budget" inputmode="decimal" /></label></div>
      <div class="row"><label>Allowed risk<Dropdown v-model="policy.max_risk" :options="mode==='simulate'?[{value:0,label:'Level 0 only'},{value:1,label:'Levels 0 + 1'}]:[{value:0,label:'Level 0 only'}]" /></label><label>Selection priority<Dropdown v-model="policy.preference" :options="[{value:'price',label:'Lowest price first'},{value:'risk',label:'Lowest risk first'}]" /></label></div>
      <p class="hint">High risk is always blocked. Level 0 means no detected signal, not guaranteed safety. Demo cap: 0.10 USDC.</p>
-     <div class="control-divider"><span>AGENT INSTRUCTION</span><span>↗</span></div>
-     <label class="task-label">What should the agent do?<textarea v-model="instruction" rows="4" maxlength="2000"></textarea></label>
      <div class="dataset-label"><span class="sample-icon">◈</span><div>Tokyo weather sample<small>Static demo data · one purchase per task</small></div></div>
     </fieldset>
     <div v-if="mode==='pay'" class="pay-note">This action authorizes spending Base Sepolia test USDC under the policy above.</div>
-    <button class="primary" :disabled="initializing || active || !config || !selectedAgent || blockedPayment" @click="start"><span>{{active?'Agent working…':pending?'Retry same task':mode==='pay'?'Authorize testnet payment':'Run agent'}}</span><span :class="{spinner:active}" aria-hidden="true">{{active?'':'↗'}}</span></button>
     <p v-if="!selectedAgent" class="hint">Connect an owner wallet and create an agent to run a task.</p>
     <p v-if="blockedPayment" class="error">A previous payment has unconfirmed settlement. Reconcile it before another payment.</p>
     <p v-if="error" class="error" role="alert">{{error}}</p>
@@ -258,7 +280,7 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
    <section class="results">
     <div class="panel decision-panel">
      <div class="section-title"><span class="step">02</span><div><h2>The moment of decision</h2><p>{{task?(active?'Execution in progress':'Recorded task result'):'Watch your policy become action.'}}</p></div><span class="status" :class="task?.status" role="status">{{task?statusNames[task.status]:'Ready when you are'}}</span></div>
-     <div class="flow-strip"><div v-for="(item,index) in flowSteps" :key="item.label" :class="{done:item.done}"><span>{{item.done?'✓':String(index+1).padStart(2,'0')}}</span>{{item.label}}</div></div>
+     <div class="flow-strip"><div v-for="(item,index) in flowSteps" :key="item.label" :class="{done:item.done,working:item.active}"><span class="flow-orb">{{item.done?'✓':String(index+1).padStart(2,'0')}}</span><b>{{item.label}}</b></div></div>
      <template v-if="task">
       <div class="run-policy"><span class="run-mode">{{taskModeLabel}}</span><span>≤ {{task.request.policy.per_payment}} / payment</span><span>≤ {{task.request.policy.task_budget}} total</span><span>Risk ≤ {{task.request.policy.max_risk}}</span><span>{{task.request.policy.preference==='price'?'Price first':'Risk first'}}</span></div>
       <div v-if="task.candidates.length" class="decision-metrics"><div><strong>{{task.candidates.length}}</strong><span>offers evaluated</span></div><div><strong class="metric-blocked">{{excludedCount}}</strong><span>excluded by policy</span></div><div><strong class="metric-eligible">{{eligibleCount}}</strong><span>eligible options</span></div></div>

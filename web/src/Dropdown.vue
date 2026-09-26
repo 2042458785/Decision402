@@ -9,9 +9,16 @@
 //
 // It behaves like the control it replaces: click or Enter or Space to open,
 // arrows to move, Enter to take, Escape to abandon, and clicking away closes.
+//
+// Clicks are stopped and their default prevented because callers wrap this in
+// a <label>, and a label re-dispatches clicks to its labelable control — a
+// <button> is one. Without this, choosing an option closed the list and the
+// label immediately reopened it by forwarding the same click to the face.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-type Option = { value: string | number; label: string };
+// `short` is what the control says when closed, where the column is narrow.
+// `label` is always what the open list says, in full.
+type Option = { value: string | number; label: string; short?: string };
 
 const props = defineProps<{
   modelValue: string | number;
@@ -83,7 +90,13 @@ onBeforeUnmount(() => document.removeEventListener("mousedown", onDocument));
 // An option can disappear while the list is open — the advisory risk level is
 // only offered in simulation — so the list closes rather than pointing at a
 // row that is no longer there.
-watch(() => props.options, hide);
+//
+// This watches what the options ARE, not the array they arrive in. Callers pass
+// an inline literal, so the array is a new object on every render: watching its
+// identity fired on every keystroke elsewhere on the page and shut the list
+// the moment it opened.
+const signature = computed(() => props.options.map((o) => String(o.value)).join("|"));
+watch(signature, hide);
 watch(() => props.disabled, (value) => value && hide());
 </script>
 
@@ -95,10 +108,10 @@ watch(() => props.disabled, (value) => value && hide());
       :disabled="disabled"
       :aria-expanded="open"
       aria-haspopup="listbox"
-      @click="open ? hide() : show()"
+      @click.stop.prevent="open ? hide() : show()"
       @keydown="onKey"
     >
-      <span>{{ current?.label }}</span>
+      <span>{{ current?.short ?? current?.label }}</span>
       <i aria-hidden="true" />
     </button>
     <ul v-if="open" class="dd-list" role="listbox" @keydown="onKey">
@@ -112,7 +125,7 @@ watch(() => props.disabled, (value) => value && hide());
           cursor: index === active,
         }"
         @mouseenter="active = index"
-        @click="take(option)"
+        @click.stop.prevent="take(option)"
       >
         <span class="dd-tick" aria-hidden="true">{{ option.value === modelValue ? "→" : "" }}</span>
         {{ option.label }}
