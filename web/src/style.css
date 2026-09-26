@@ -220,6 +220,40 @@ h1 span { color: var(--faint); }
   color: var(--accent);
 }
 
+/* Owner wallet, agent wallet, and funding are visible parts of the payment flow. */
+.onboarding { border-top: 1px solid var(--rule); padding: 28px 0 34px; }
+.onboard-title { display: grid; grid-template-columns: 1fr 2fr; gap: 8px 28px; align-items: end; margin-bottom: 22px; }
+.onboard-title .eyebrow { grid-column: 1 / -1; }
+.onboard-title h2 { font-size: clamp(26px, 3vw, 38px); line-height: 1.05; letter-spacing: -.045em; font-weight: 500; margin: 0; }
+.onboard-title p { margin: 0; color: var(--grey); max-width: 65ch; font-size: 14px; }
+.onboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.onboard-card { display: flex; flex-direction: column; min-width: 0; background: var(--card); border: 1px solid var(--rule); padding: 22px; min-height: 252px; }
+.onboard-step { font: 11px var(--mono); letter-spacing: .12em; color: var(--accent); }
+.onboard-card h3 { font-size: 20px; font-weight: 500; letter-spacing: -.025em; margin: 15px 0 6px; }
+.onboard-card p { color: var(--grey); font-size: 13px; margin: 0 0 15px; }
+.onboard-card > code, .agent-address code { display: block; color: var(--ink-2); font: 11px var(--mono); overflow-wrap: anywhere; margin-top: 14px; }
+.onboard-card label { display: block; color: var(--grey); font-size: 12px; margin: 0 0 10px; }
+.onboard-card label small { color: var(--faint); }
+.onboard-card input, .onboard-card select { display: block; width: 100%; margin-top: 5px; padding: 9px 10px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); border-radius: 0; font-size: 13px; }
+.onboard-card input[type=password] { font-family: var(--mono); }
+.onboard-fields { margin: 3px 0 13px; }
+.onboard-fields .dd { margin-top: 5px; }
+.onboard-button, .ghost-button { border: 1px solid var(--ink); background: var(--ink); color: white; padding: 10px 13px; font-size: 12px; cursor: pointer; margin-top: auto; text-align: left; }
+.onboard-button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+.onboard-button:disabled, .ghost-button:disabled { opacity: .4; cursor: default; }
+.ghost-button { background: transparent; color: var(--ink); border-color: var(--rule); }
+.ghost-button:hover:not(:disabled) { border-color: var(--ink); }
+.onboard-actions { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+.onboard-actions .onboard-button { margin: 0; }
+.agent-address { border: 1px solid var(--rule); background: var(--paper); padding: 10px; margin: 7px 0 13px; }
+.agent-address small { font: 10px var(--mono); letter-spacing: .06em; color: var(--grey); }
+.agent-address code { margin: 5px 0; }
+.agent-address span { font: 12px var(--mono); color: var(--ok); }
+.onboard-card > a { color: var(--accent); font-size: 12px; margin-top: 11px; }
+.onboard-disclaimer { font-size: 12px; color: var(--grey); margin: 14px 0 0; }
+.onboard-disclaimer code { font-family: var(--mono); }
+@media (max-width: 900px) { .onboard-grid { grid-template-columns: 1fr; } .onboard-card { min-height: 0; } .onboard-title { grid-template-columns: 1fr; } }
+
 /* ── workspace heading ─────────────────────────────────────────────────── */
 
 .workspace-heading {
@@ -732,6 +766,28 @@ footer {
   .intro { grid-template-columns: 1fr 380px; gap: 32px; }
   main { grid-template-columns: 310px minmax(0, 1fr); gap: 18px; }
   .candidate-head, .candidate-row { grid-template-columns: 1.3fr 0.7fr 0.9fr 0.7fr; gap: 10px; }
+}
+@media (max-width: 900px) {
+  .intro { grid-template-columns: minmax(0, 1fr); }
+  .architecture { max-width: 520px; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  .workspace-heading { align-items: flex-start; flex-wrap: wrap; }
+  .workspace-actions { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .shell { padding: 0 18px; }
+  .topbar { height: auto; min-height: 80px; gap: 10px; flex-wrap: wrap; padding: 18px 0; }
+  .brand { font-size: 40px; }
+  .header-right { flex-wrap: wrap; gap: 8px 15px; }
+  .intro { padding: 40px 0; }
+  h1 { font-size: 64px; }
+  .architecture { padding: 15px 10px; }
+  .arch-line { width: 10px; }
+  .arch-node small { white-space: normal; }
+  .panel { padding: 18px; }
+  .row { grid-template-columns: 1fr; gap: 0; }
+  footer { flex-wrap: wrap; gap: 10px; }
+  .footer-brand > span { display: block; margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { animation: none !important; transition: none !important; }

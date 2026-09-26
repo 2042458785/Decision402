@@ -2,6 +2,14 @@
 
 ## 新版：直接运行 Agent 页面 / New: Run the Agent UI
 
+**新流程：**连接 MetaMask（Base Sepolia）并签署登录消息 → 输入 Agent 名称、DeepSeek API URL／模型／可选个人 API key → 创建 Agent 与专属测试网钱包 → 在 MetaMask 中确认给该地址转入测试 USDC（默认 10）→ 设置单次预算与风险偏好 → 先 Preview，再执行 Pay。页面自动使用该 Agent 的钱包付款；主页面不再需要手工创建 `.buyer-key`。钱包私钥和用户输入的模型 key 保存在本机被 Git 忽略的 `artifacts/agents/`，文件权限为 0600；页面和模型上下文不接收钱包私钥。
+
+**New flow:** Connect MetaMask on Base Sepolia and sign in → enter an agent name, DeepSeek API URL/model, and optional personal API key → create an agent and its testnet wallet → approve a test-USDC transfer to it in MetaMask (default 10) → set the budget and risk policy → Preview, then Pay. The main UI now pays from the agent wallet and does not require a manually created `.buyer-key`. The wallet key and any entered model key stay in Git-ignored local `artifacts/agents/` files with 0600 permissions; neither the page nor the model prompt receives the wallet key.
+
+充值是用户钱包发起的链上 ERC-20 转账，需要用户钱包持有 Base Sepolia ETH 支付这笔充值的 gas。Agent 后续使用现有 x402 授权流程，仍由 Go 策略引擎在签名前执行 Intercepta 复查。`artifacts/agents/` 是本地保管库，删除后无法恢复其中 Agent 钱包及剩余测试币；请只充值测试币并备份该目录。当前仅支持官方 DeepSeek 地址 `https://api.deepseek.com` 与 `deepseek-flash`／`deepseek-v4-pro`。连接钱包只用于本地会话，不表示已经具备可公开部署的多用户托管安全性。
+
+Funding is an onchain ERC-20 transfer from the owner wallet and requires Base Sepolia ETH for gas. Subsequent x402 payments use the existing Go policy engine and a fresh Intercepta check before signing. Back up `artifacts/agents/`: deleting it loses the agent wallet and any remaining test tokens. Use testnet assets only. This adapter currently accepts the official `https://api.deepseek.com` endpoint and `deepseek-flash` or `deepseek-v4-pro`. Wallet sign-in secures the local session; this is not a production multi-user custody service.
+
 现已接入 **DeepSeek + Go 策略引擎 + Intercepta + x402 + Vue3 页面**。一个进程提供页面和四个本地演示服务，不再需要分别启动 serve。
 
 **DeepSeek, a Go policy engine, Intercepta, x402, and a Vue3 UI** are connected. A single process hosts the UI and four local demo services.
@@ -13,9 +21,9 @@ npm --prefix web run build
 go run ./cmd/decision402
 ```
 
-打开 **http://127.0.0.1:8080**。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入英文任务“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”先运行“Live API preview · No payment”，确认 A/B 被阻断、C 被选中，再运行“Live testnet execution · Pays automatically”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
+打开 **http://127.0.0.1:8080**，先完成上面的钱包和 Agent 设置。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入英文任务“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”先运行“Live API preview · No payment”，确认 A/B 被阻断、C 被选中，再运行“Live testnet execution · Pays automatically”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
 
-Open **http://127.0.0.1:8080**. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
+Open **http://127.0.0.1:8080** and complete wallet/agent setup first. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
 
 现场可照读的中英双语讲稿：[Decision402 演示讲稿](docs/demo-script-bilingual.md)。完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选本次扫描未检出风险且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
 
@@ -257,6 +265,9 @@ All paths below are relative to the Git repository root containing this README.
 | `.env.example` | 空白模板，列出 key、两个地址及来源配置。 | Blank template listing the key, two addresses, and fixture source. |
 | `.env` | 由模板复制得到的本地实际配置，不提交 Git。 | Local configuration copied from the template; excluded from Git. |
 | `.buyer-key` | 可选测试网付款使用的本地测试钱包私钥文件，不提交 Git。 | Optional local test-wallet private key file for testnet payment; excluded from Git. |
+| `artifacts/agents/` | 页面创建的 Agent 钱包密钥和模型设置，本地 0600 文件，不提交 Git。 | Local 0600 vault for UI-created agent wallet keys and model settings; excluded from Git. |
+| `internal/agent/owner.go` | 钱包签名登录、创建 Agent、保存钱包和限制访问。 | Wallet-signature sign-in, agent creation, private wallet storage, and access checks. |
+| `web/src/App.vue` | 连接 MetaMask、创建 Agent、充值、运行 Preview/Pay。 | Connects MetaMask, creates and funds agents, and runs Preview/Pay. |
 | `.gitignore` | 忽略真实配置、运行报告、编译输出等本地文件。 | Excludes real configuration, run reports, build outputs, and other local files. |
 | `cmd/intercepta-probe/main.go` | 程序入口：解析参数、加载配置、启动扫描和处理退出码。 | Entry point: parses flags, loads configuration, starts scanning, and handles exit codes. |
 | `cmd/x402-demo/main.go` | 启动付费服务、查看 402 报价，或用测试钱包尝试付款。 | Starts the paid service, inspects a 402 offer, or attempts a test-wallet payment. |

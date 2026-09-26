@@ -2,13 +2,19 @@
 import {computed,onMounted,onUnmounted,ref} from 'vue'
 import Dropdown from './Dropdown.vue'
 type Policy={per_payment:string;task_budget:string;max_risk:number;preference:string}
-type Request={id:string;instruction:string;mode:string;policy:Policy}
+type Request={id:string;agent_id:string;instruction:string;mode:string;policy:Policy}
+type Agent={id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string}
+type EthereumProvider={request:(args:{method:string;params?:unknown[]})=>Promise<any>;on?:(event:string,handler:(accounts:string[])=>void)=>void;removeListener?:(event:string,handler:(accounts:string[])=>void)=>void}
+declare global { interface Window { ethereum?: EthereumProvider } }
 type Candidate={service:{id:string;name:string;pay_to:string;amount:string};level:number;eligible:boolean;reason:string;source:string;quote?:{amount:string};risk?:{toxicScore?:number;traits?:{name:string;description:string}[];duration_ms:number}}
 type Task={request:Request;status:string;candidates:Candidate[];selected?:Candidate;events:{time:string;kind:string;data:unknown}[];summary:string;error?:string;payment_attempted:boolean;payment?:{settled:boolean;signed:boolean;transaction?:string;error?:string;data?:unknown}}
 const instruction=ref('Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.')
 const mode=ref('simulate')
 const policy=ref<Policy>({per_payment:'0.10',task_budget:'0.10',max_risk:1,preference:'price'})
-const task=ref<Task|null>(null), config=ref<{model:string}|null>(null), error=ref(''), sending=ref(false)
+const task=ref<Task|null>(null), config=ref<{model:string;asset:string}|null>(null), error=ref(''), sending=ref(false)
+const owner=ref(''), agents=ref<Agent[]>([]), agentID=ref(''), agentName=ref('Tokyo buyer'), modelURL=ref('https://api.deepseek.com'), modelName=ref('deepseek-flash'), modelAPIKey=ref('')
+const agentBusy=ref(false), funding=ref(false), walletError=ref(''), balance=ref(''), fundAmount=ref('10'), fundTx=ref('')
+const selectedAgent=computed(()=>agents.value.find(a=>a.id===agentID.value))
 const pending=ref<Request|null>(null)
 const initializing=ref(true)
 let timer:ReturnType<typeof setInterval>|undefined
@@ -60,6 +66,90 @@ const flowSteps=computed(()=>[
  {label:'Settle',done:!!task.value?.payment?.settled},
 ])
 const canStartFresh=computed(()=>!initializing.value&&!active.value&&!pending.value&&!(task.value?.payment_attempted&&!task.value?.payment?.settled))
+const apiHeaders={'Content-Type':'application/json','X-Decision402':'local-ui'}
+function provider():EthereumProvider { if(!window.ethereum)throw new Error('Install or enable MetaMask in this browser');return window.ethereum }
+async function ensureBaseSepolia(){
+ const wallet=provider(), chain=await wallet.request({method:'eth_chainId'})
+ if(chain!=='0x14a34')await wallet.request({method:'wallet_switchEthereumChain',params:[{chainId:'0x14a34'}]})
+ if(await wallet.request({method:'eth_chainId'})!=='0x14a34')throw new Error('Switch MetaMask to Base Sepolia first')
+}
+async function fetchAgents(){
+ const r=await fetch('/api/agents');if(!r.ok)throw new Error('Wallet sign-in expired; connect again')
+ agents.value=await r.json()
+ if(!agentID.value)agentID.value=localStorage.getItem('decision402-agent')??''
+ if(!agents.value.some(a=>a.id===agentID.value))agentID.value=agents.value[0]?.id??''
+ if(agentID.value)await refreshBalance()
+}
+function chooseAgent(){localStorage.setItem('decision402-agent',agentID.value);balance.value='';fundTx.value='';void refreshBalance()}
+async function connectWallet(){
+ walletError.value='';agentBusy.value=true
+ try{
+  const wallet=provider(), accounts=await wallet.request({method:'eth_requestAccounts'}) as string[]
+  if(!accounts?.[0])throw new Error('No wallet account selected')
+  await ensureBaseSepolia()
+  const address=accounts[0]
+  const challengeResponse=await fetch('/api/auth/challenge?address='+encodeURIComponent(address))
+  if(!challengeResponse.ok)throw new Error('Could not request wallet sign-in')
+  const challenge=await challengeResponse.json()
+  const signature=await wallet.request({method:'personal_sign',params:[challenge.message,address]}) as string
+  const session=await fetch('/api/auth/session',{method:'POST',headers:apiHeaders,body:JSON.stringify({address,nonce:challenge.nonce,signature})})
+  if(!session.ok)throw new Error('Wallet signature was not accepted')
+  owner.value=address
+  await fetchAgents()
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not connect wallet'}finally{agentBusy.value=false}
+}
+async function createAgent(){
+ walletError.value='';agentBusy.value=true
+ try{
+  if(!owner.value)throw new Error('Connect your owner wallet first')
+  const response=await fetch('/api/agents',{method:'POST',headers:apiHeaders,body:JSON.stringify({name:agentName.value,model_url:modelURL.value,model_name:modelName.value,model_api_key:modelAPIKey.value.trim()})})
+  const result=await response.json()
+  if(!response.ok)throw new Error(result.error??'Could not create agent')
+  modelAPIKey.value=''
+  agents.value.push(result as Agent);agentID.value=result.id;localStorage.setItem('decision402-agent',result.id);balance.value='0';fundTx.value=''
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not create agent'}finally{agentBusy.value=false}
+}
+async function refreshBalance(){
+ const agent=selectedAgent.value
+ if(!agent || !config.value)return
+ try{
+  await ensureBaseSepolia()
+  const data='0x70a08231'+agent.wallet.slice(2).toLowerCase().padStart(64,'0')
+  const value=await provider().request({method:'eth_call',params:[{to:config.value.asset,data},'latest']}) as string
+  const atomic=BigInt(value)
+  balance.value=(atomic/1000000n).toString()+'.'+(atomic%1000000n).toString().padStart(6,'0')
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not read test USDC balance'}
+}
+function usdcUnits(value:string):bigint{
+ if(!/^\d{1,3}(\.\d{1,6})?$/.test(value))throw new Error('Enter a USDC amount with up to six decimal places')
+ const [whole,fraction='']=value.split('.')
+ const amount=BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'))
+ if(amount<=0n || amount>100000000n)throw new Error('Choose between 0 and 100 test USDC')
+ return amount
+}
+async function fundAgent(){
+ walletError.value='';funding.value=true
+ try{
+  const agent=selectedAgent.value
+  if(!agent || !config.value || !owner.value)throw new Error('Connect and create an agent first')
+  await ensureBaseSepolia()
+  const accounts=await provider().request({method:'eth_accounts'}) as string[]
+  if(!accounts?.some(a=>a.toLowerCase()===owner.value.toLowerCase()))throw new Error('MetaMask account changed; connect again')
+  const amount=usdcUnits(fundAmount.value)
+  const data='0xa9059cbb'+agent.wallet.slice(2).toLowerCase().padStart(64,'0')+amount.toString(16).padStart(64,'0')
+  const tx=await provider().request({method:'eth_sendTransaction',params:[{from:owner.value,to:config.value.asset,data}]}) as string
+  fundTx.value=tx
+  for(let i=0;i<60;i++){
+   const receipt=await provider().request({method:'eth_getTransactionReceipt',params:[tx]}) as {status:string}|null
+   if(receipt){if(receipt.status!=='0x1')throw new Error('The funding transaction failed onchain');await refreshBalance();return}
+   await new Promise(resolve=>setTimeout(resolve,1500))
+  }
+  throw new Error('Funding is pending. Check the transaction link, then refresh the balance.')
+ }catch(e){walletError.value=e instanceof Error?e.message:'Funding failed'}finally{funding.value=false}
+}
+function walletChanged(accounts:string[]){
+ if(owner.value && !accounts.some(a=>a.toLowerCase()===owner.value.toLowerCase())){owner.value='';agents.value=[];agentID.value='';balance.value='';task.value=null;walletError.value='Wallet account changed. Connect again.'}
+}
 function newTask(){
  if(!canStartFresh.value)return
  task.value=null
@@ -82,9 +172,10 @@ async function start(){
  error.value='';sending.value=true
  try{
   // Retry an uncertain POST with the SAME immutable request ID and payload.
-  const request=pending.value??{id:crypto.randomUUID(),instruction:instruction.value,mode:mode.value,policy:{...policy.value,max_risk:mode.value==='simulate'?policy.value.max_risk:0}}
+  if(!selectedAgent.value)throw new Error('Connect your wallet and create an agent first')
+  const request=pending.value??{id:crypto.randomUUID(),agent_id:selectedAgent.value.id,instruction:instruction.value,mode:mode.value,policy:{...policy.value,max_risk:mode.value==='simulate'?policy.value.max_risk:0}}
   pending.value=request;localStorage.setItem('decision402-pending',JSON.stringify(request));localStorage.setItem('decision402-last',request.id)
-  const response=await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json','X-Decision402':'local-ui'},body:JSON.stringify(request)})
+  const response=await fetch('/api/tasks',{method:'POST',headers:apiHeaders,body:JSON.stringify(request)})
   const result=await response.json()
   if(!response.ok){if(response.status<500){pending.value=null;localStorage.removeItem('decision402-pending')}throw new Error(result.error??'Could not create the task')}
   task.value=result
@@ -94,12 +185,15 @@ async function start(){
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed. Retry will use the same task ID.'}finally{sending.value=false}
 }
 onMounted(async()=>{
+ window.ethereum?.on?.('accountsChanged',walletChanged)
  try{const r=await fetch('/api/config');if(!r.ok)throw new Error('Backend is not running');config.value=await r.json()
+  const session=await fetch('/api/auth/me')
+  if(session.ok){const current=await session.json();const accounts=window.ethereum?await window.ethereum.request({method:'eth_accounts'}) as string[]:[];if(accounts?.some(a=>a.toLowerCase()===current.owner.toLowerCase())){owner.value=current.owner;await fetchAgents()}}
   const saved=localStorage.getItem('decision402-pending');if(saved)pending.value=JSON.parse(saved)
-  const id=new URLSearchParams(location.search).get('task')??localStorage.getItem('decision402-last');if(id){await getTask(id);if(task.value){policy.value={...task.value.request.policy,max_risk:task.value.request.mode==='simulate'?task.value.request.policy.max_risk:0};mode.value=task.value.request.mode;instruction.value=task.value.request.instruction}if(['queued','running'].includes(task.value?.status??''))watchTask(id)}
+  const id=new URLSearchParams(location.search).get('task')??localStorage.getItem('decision402-last');if(id && owner.value){await getTask(id);if(task.value){policy.value={...task.value.request.policy,max_risk:task.value.request.mode==='simulate'?task.value.request.policy.max_risk:0};mode.value=task.value.request.mode;instruction.value=task.value.request.instruction;agentID.value=task.value.request.agent_id??agentID.value}if(['queued','running'].includes(task.value?.status??''))watchTask(id)}
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed'}finally{initializing.value=false}
 })
-onUnmounted(()=>clearInterval(timer))
+onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('accountsChanged',walletChanged)})
 </script>
 
 <template>
@@ -109,7 +203,7 @@ onUnmounted(()=>clearInterval(timer))
     <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 21 7v6c0 4-5 7-9 9-4-2-9-5-9-9V7l9-4Z" stroke="currentColor" stroke-width="1.6"/><path d="m8 12 3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     <span>Decision<span class="brand-number">402</span><small>AGENT PAYMENT CONTROL</small></span>
    </a>
-   <div class="header-right"><span class="connection"><i :class="{online:!!config}"></i>{{config?'Workspace connected':'Connecting'}}</span><span class="network"><i></i>Base Sepolia <b>TESTNET</b></span></div>
+   <div class="header-right"><span class="connection"><i :class="{online:!!config}"></i>{{owner?shortAddress(owner):config?'Connect owner wallet':'Connecting'}}</span><span class="network"><i></i>Base Sepolia <b>TESTNET</b></span></div>
   </header>
 
   <section class="intro">
@@ -127,6 +221,16 @@ onUnmounted(()=>clearInterval(timer))
    </div>
   </section>
 
+  <section class="onboarding" aria-label="Set up your agent wallet">
+   <div class="onboard-title"><span class="eyebrow">YOUR AGENT WORKSPACE</span><h2>Give an agent its own wallet.</h2><p>Connect an owner wallet, create an agent, and fund its Base Sepolia test USDC wallet. Your agent pays only after the policy and risk checks pass.</p></div>
+   <div class="onboard-grid">
+    <div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code></div>
+    <div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':'Create agent + wallet'}} ↗</button></div>
+    <div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<select v-model="agentID" @change="chooseAgent"><option v-for="agent in agents" :key="agent.id" :value="agent.id">{{agent.name}} · {{shortAddress(agent.wallet)}}</option></select></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div>
+   </div>
+   <p v-if="walletError" class="error" role="alert">{{walletError}}</p>
+   <p class="onboard-disclaimer">Local testnet prototype. The backend keeps the agent wallet key in a private local file; back up <code>artifacts/agents/</code> before moving or deleting this workspace. Never fund it with mainnet assets.</p>
+  </section>
   <div class="workspace-heading"><div><span class="eyebrow">PAYMENT WORKSPACE</span><p>From an instruction to an accountable decision.</p></div><div class="workspace-actions"><span class="workspace-note">Mainnet risk data <span>↔</span> Testnet settlement</span><button class="new-task" :disabled="!canStartFresh" @click="newTask"><span aria-hidden="true">+</span> New task</button></div></div>
   <main>
    <section class="panel controls">
@@ -143,10 +247,11 @@ onUnmounted(()=>clearInterval(timer))
      <div class="dataset-label"><span class="sample-icon">◈</span><div>Tokyo weather sample<small>Static demo data · one purchase per task</small></div></div>
     </fieldset>
     <div v-if="mode==='pay'" class="pay-note">This action authorizes spending Base Sepolia test USDC under the policy above.</div>
-    <button class="primary" :disabled="initializing || active || !config || blockedPayment" @click="start"><span>{{active?'Agent working…':pending?'Retry same task':mode==='pay'?'Authorize testnet payment':'Run agent'}}</span><span :class="{spinner:active}" aria-hidden="true">{{active?'':'↗'}}</span></button>
+    <button class="primary" :disabled="initializing || active || !config || !selectedAgent || blockedPayment" @click="start"><span>{{active?'Agent working…':pending?'Retry same task':mode==='pay'?'Authorize testnet payment':'Run agent'}}</span><span :class="{spinner:active}" aria-hidden="true">{{active?'':'↗'}}</span></button>
+    <p v-if="!selectedAgent" class="hint">Connect an owner wallet and create an agent to run a task.</p>
     <p v-if="blockedPayment" class="error">A previous payment has unconfirmed settlement. Reconcile it before another payment.</p>
     <p v-if="error" class="error" role="alert">{{error}}</p>
-    <div class="model"><span><i></i>{{config?.model??'Connecting…'}}</span><small>Model calls use API credits</small></div>
+    <div class="model"><span><i></i>{{selectedAgent?.model_name??config?.model??'Connecting…'}}</span><small>Model calls use API credits</small></div>
     <details class="scope-details"><summary>About this demo <span>+</span></summary><p>Four local endpoints serve the same static sample. In live modes, A/B share a known-risk fixture; C/D share a recipient with no detected risk signal. Level 1 is simulation-only. Unknown risk puts payment on hold.</p></details>
    </section>
 

@@ -26,8 +26,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if cfg.DeepSeekKey == "" || cfg.DeepSeekModel == "" {
-		log.Fatal("set DEEPSEEK_API_KEY and DEEPSEEK_MODEL in .env")
+	if cfg.DeepSeekModel == "" {
+		cfg.DeepSeekModel = "deepseek-flash"
 	}
 	if cfg.DeepSeekURL != "https://api.deepseek.com" {
 		log.Fatal("DEEPSEEK_BASE_URL must be https://api.deepseek.com")
