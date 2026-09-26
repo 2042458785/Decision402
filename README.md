@@ -14,18 +14,57 @@ Funding is an onchain ERC-20 transfer from the owner wallet and requires Base Se
 
 **DeepSeek, a Go policy engine, Intercepta, x402, and a Vue3 UI** are connected. A single process hosts the UI and four local demo services.
 
+### 开始之前 / Before you start
+
+| 需要 / Needed | 版本 / Version | 用途 / Why |
+| --- | --- | --- |
+| **Go** | 1.24 或更新 / 1.24+ | 策略引擎与 x402 SDK / the policy engine and the x402 SDK |
+| **Node.js** | 20.19+ 或 22.12+ / 20.19+ or 22.12+ | 构建 Vue 3 页面（Vite 8 的最低要求）/ builds the Vue 3 UI (Vite 8's floor) |
+| **MetaMask** | 浏览器扩展 / browser extension | 登录签名与给 Agent 充值 / sign-in and funding the agent |
+| **Intercepta API key** | 沙盒 / sandbox | 收款地址风险筛查 / screening every recipient |
+| **DeepSeek API key** | — | Agent 理解任务 / the agent reads the task |
+
+检查版本 / Check your versions:
+
 ```sh
-cd /Users/ddy/GolandProjects/Decision402/Decision402
+go version     # go1.24.0 或更高 / or newer
+node -v        # v20.19+ 或 v22.12+ / or v22.12+
+```
+
+钱包里还需要 Base Sepolia 的测试资产：付 gas 的 ETH，以及要转给 Agent 的测试 USDC。两者都可以从公共水龙头免费获取，没有任何真实价值。
+
+Your wallet also needs Base Sepolia testnet assets: ETH to pay gas for the
+funding transfer, and test USDC to send to the agent. Both are free from public
+faucets and neither has any real value.
+
+- Base Sepolia ETH — <https://www.alchemy.com/faucets/base-sepolia>
+- Base Sepolia USDC — <https://faucet.circle.com>
+
+```sh
+git clone https://github.com/2042458785/Decision402.git
+cd Decision402
+
+# Configuration. The app will not start without an Intercepta API key:
+# screening every recipient is the product, so it refuses to run blind.
+cp .env.example .env
+#   INTERCEPTA_API_KEY   sandbox key from https://intercepta.io/ethglobal
+#   DEEPSEEK_API_KEY     from https://platform.deepseek.com
+# Open .env and set both before continuing.
+
 npm --prefix web ci
 npm --prefix web run build
 go run ./cmd/decision402
 ```
 
+One process serves the interface and the API together on
+**http://127.0.0.1:8080** — there is no separate backend to deploy or
+connect.
+
 打开 **http://127.0.0.1:8080**，先完成上面的钱包和 Agent 设置。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入英文任务“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”先运行“Live API preview · No payment”，确认 A/B 被阻断、C 被选中，再运行“Live testnet execution · Pays automatically”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
 
 Open **http://127.0.0.1:8080** and complete wallet/agent setup first. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
 
-现场可照读的中英双语讲稿：[Decision402 演示讲稿](docs/demo-script-bilingual.md)。完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选本次扫描未检出风险且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
+完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选本次扫描未检出风险且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
 
 For bilingual instructions, architecture, and limitations, see the [Step 4 guide](docs/step4-agent.md) and [validation record](docs/step4-validation.md). **The live demo uses the verified binary path: risky A/B are blocked and the agent selects affordable C after no risk signal is detected. The level-1 price/risk trade-off remains explicitly simulated.**
 
@@ -53,7 +92,8 @@ This README provides Chinese and English explanations in each section. Commands 
 Run from the repository root. Keep the real key in `.env`, never in the tracked `.env.example`. Use a plain URL for `INTERCEPTA_ADDRESS_SOURCE`, without Markdown link formatting.
 
 ```sh
-cd /Users/ddy/GolandProjects/Decision402/Decision402
+git clone https://github.com/2042458785/Decision402.git
+cd Decision402
 ```
 
 **1. 不花测试币，先验证拦截。**下面会消耗两次真实 API 调用，通过 x402 SDK 检查正常放行、风险阻止；替代支付模块不读取钱包、不生成签名、不转账。
@@ -103,14 +143,16 @@ Obtain a sandbox key from the event page. Use a newly created address you contro
 This Git repository currently lives inside a same-named subdirectory of the outer GoLand project. Run these commands in the directory containing this README. On another computer, replace the path with your own repository location:
 
 ```sh
-cd /Users/ddy/GolandProjects/Decision402/Decision402
+git clone https://github.com/2042458785/Decision402.git
+cd Decision402
 cp -n .env.example .env
 chmod 600 .env
 ```
 
 | 命令 / Command | 中文说明 | English explanation |
 | --- | --- | --- |
-| `cd /Users/ddy/GolandProjects/Decision402/Decision402` | 进入实际 Git 仓库。两层同名目录来自当前本地目录结构。 | Enter the actual Git repository. The repeated name reflects the current local folder structure. |
+| `git clone https://github.com/2042458785/Decision402.git
+cd Decision402` | 进入实际 Git 仓库。两层同名目录来自当前本地目录结构。 | Enter the actual Git repository. The repeated name reflects the current local folder structure. |
 | `cp -n .env.example .env` | 把模板复制成本地配置；`-n` 表示已有 `.env` 时不覆盖。 | Copy the template to a local configuration file. `-n` prevents overwriting an existing `.env`. |
 | `chmod 600 .env` | 将权限设置为只有当前用户可以读写。 | Set the file permissions so only its owner can read and write it. |
 
@@ -335,4 +377,4 @@ Raw reports are excluded from Git by default. Review them before sharing and sel
 - [Getting Started — 接入指南](https://docs.web3antivirus.io/reference/getting-started-1)
 - [ETHGlobal Tokyo: Intercepta — 赞助商奖项要求](https://ethglobal.com/events/tokyo2026/prizes/intercepta)
 
-开发辅助披露 / Development assistance: [AI 使用说明](docs/ai-assistance.md).
+开发辅助披露 / Development assistance: parts of this project were written with AI coding assistants.
