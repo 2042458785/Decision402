@@ -1,0 +1,1 @@
+{"name":"decision402-ui","private":true,"version":"0.1.0","type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"vue-tsc --noEmit && vite build"},"dependencies":{"vue":"^3.5.43"},"devDependencies":{"@types/node":"^26.6.3","@vitejs/plugin-vue":"^6.0.9","typescript":"5.9.3","vite":"^8.3.1","vue-tsc":"^3.3.11"}}
