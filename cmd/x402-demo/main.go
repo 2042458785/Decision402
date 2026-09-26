@@ -159,7 +159,7 @@ func request(rawURL, expectedPayTo, keyFile string) error {
 	if len(body) > 64*1024 {
 		return errors.New("response exceeded 64 KiB")
 	}
-	fmt.Printf("HTTP %d\n", resp.StatusCode)
+	fmt.Printf("HTTP  %d\n", resp.StatusCode)
 	if header := resp.Header.Get("PAYMENT-REQUIRED"); header != "" {
 		if decoded, err := base64.StdEncoding.DecodeString(header); err == nil && json.Valid(decoded) {
 			var pretty bytes.Buffer
