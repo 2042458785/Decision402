@@ -178,7 +178,7 @@ func TestSecondFailureRetainsFirstResponse(t *testing.T) {
 }
 
 func TestConfigValidationAndPrecedence(t *testing.T) {
-	for _, name := range []string{"INTERCEPTA_API_KEY", "INTERCEPTA_NORMAL_ADDRESS", "INTERCEPTA_RISK_ADDRESS", "INTERCEPTA_ADDRESS_SOURCE"} {
+	for _, name := range []string{"INTERCEPTA_API_KEY", "INTERCEPTA_NORMAL_ADDRESS", "INTERCEPTA_RISK_ADDRESS", "INTERCEPTA_ADDRESS_SOURCE", "INTERCEPTA_LOW_RISK_TRAITS", "INTERCEPTA_LOW_RISK_ADDRESS"} {
 		value, exists := os.LookupEnv(name)
 		os.Unsetenv(name)
 		t.Cleanup(func() {
@@ -200,6 +200,26 @@ func TestConfigValidationAndPrecedence(t *testing.T) {
 	if err != nil || cfg.APIKey != "file-key" {
 		t.Fatalf("dotenv: %v", err)
 	}
+	t.Setenv("INTERCEPTA_LOW_RISK_TRAITS", "reviewed_advisory")
+	cfg, err = LoadConfig(path)
+	if err != nil || len(cfg.LowRiskTraits) != 1 || cfg.LowRiskTraits[0] != "reviewed_advisory" {
+		t.Fatalf("low-risk configuration: %+v %v", cfg.LowRiskTraits, err)
+	}
+	t.Setenv("INTERCEPTA_LOW_RISK_TRAITS", "reviewed_advisory,reviewed_advisory")
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("duplicate low-risk trait names must fail")
+	}
+	t.Setenv("INTERCEPTA_LOW_RISK_TRAITS", "")
+	t.Setenv("INTERCEPTA_LOW_RISK_ADDRESS", "0x3333333333333333333333333333333333333333")
+	cfg, err = LoadConfig(path)
+	if err != nil || cfg.LowRiskAddress != "0x3333333333333333333333333333333333333333" {
+		t.Fatalf("low-risk fixture configuration: %v", err)
+	}
+	t.Setenv("INTERCEPTA_LOW_RISK_ADDRESS", normalFixture)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("low-risk address may not reuse the normal fixture")
+	}
+	t.Setenv("INTERCEPTA_LOW_RISK_ADDRESS", "")
 	t.Setenv("INTERCEPTA_API_KEY", "environment-key")
 	cfg, err = LoadConfig(path)
 	if err != nil || cfg.APIKey != "environment-key" {
