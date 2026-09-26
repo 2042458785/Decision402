@@ -66,7 +66,10 @@ const taskModeLabel=computed(()=>task.value?.request.mode==='simulate'?'SIMULATE
 // It picks up from exactly where it sits in its column rather than from the
 // left of the screen — otherwise it teleports across the page the moment it
 // detaches, because its column is on the right.
-const SIZE=200
+// The circle's size now tracks the viewport, so the roller reads it from the
+// element rather than assuming a fixed 200px — otherwise on a smaller laptop
+// it would travel the wrong distance and stop short of the right edge.
+const rollSize=ref(200)
 const rolling=ref(false)
 const rollX=ref(0)
 const rollY=ref(0)
@@ -76,6 +79,8 @@ function onScroll(){
  if(!rollAnchor)rollAnchor=document.querySelector('.onboard-shape.circle')
  if(!rollAnchor){rolling.value=false;return}
  const box=rollAnchor.getBoundingClientRect()
+ const drawnSize=parseFloat(getComputedStyle(rollAnchor).getPropertyValue('--shape'))
+ if(drawnSize>0)rollSize.value=drawnSize
  const past=-box.top
  if(past<=0){rolling.value=false;rollSpin.value=0;return}
  rolling.value=true
@@ -83,15 +88,16 @@ function onScroll(){
  // so its left edge is well left of the circle itself. Measuring the box made
  // the roller jump leftwards the moment it appeared; this is where the circle
  // actually is.
- const startX=box.left+(box.width-SIZE)/2
- const acrossDistance=Math.max(0,window.innerWidth-SIZE-startX)
- const downDistance=Math.max(1,window.innerHeight-SIZE)
+ const drawn=Math.min(box.width,rollSize.value)
+ const startX=box.left+(box.width-drawn)/2
+ const acrossDistance=Math.max(0,window.innerWidth-drawn-startX)
+ const downDistance=Math.max(1,window.innerHeight-drawn)
  const across=Math.min(acrossDistance,past)
  const down=Math.min(downDistance,Math.max(0,past-acrossDistance))
  rollX.value=startX+across
  rollY.value=down
  // one turn per circumference, so it reads as rolling rather than sliding
- rollSpin.value=((across+down)/(Math.PI*SIZE))*360
+ rollSpin.value=((across+down)/(Math.PI*drawn))*360
 }
 
 // The headline's first word can be pushed along its line, from where it starts

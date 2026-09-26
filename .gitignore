@@ -1,0 +1,15 @@
+# Secrets. The app reads its API keys from .env, and the agent vault holds a
+# private key per agent. Neither may ever reach the repository.
+.env
+.env.local
+artifacts/
+.buyer-key
+*.key
+
+# Build output and dependencies.
+web/node_modules/
+node_modules/
+
+# Editor and OS noise.
+.idea/
+.DS_Store

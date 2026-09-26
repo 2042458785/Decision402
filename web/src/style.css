@@ -720,11 +720,39 @@ footer {
 @keyframes rise { from { opacity: 0; transform: translateY(7px); } }
 @keyframes settle { from { opacity: 0; transform: translateY(10px); } }
 
+/* ── smaller laptops ─────────────────────────────────────────────────────────
+   The run view is the part that has to survive a narrower screen, because it
+   is what a judge watches. The four stages and the three metrics both had
+   fixed column counts, which is what cramped them. */
+
 @media (max-width: 1180px) {
   .shell { padding: 0 28px; }
-  .intro { grid-template-columns: 1fr 380px; gap: 32px; }
   main { grid-template-columns: 310px minmax(0, 1fr); gap: 18px; }
   .candidate-head, .candidate-row { grid-template-columns: 1.3fr 0.7fr 0.9fr 0.7fr; gap: 10px; }
+  /* the stage labels are what run out of room first */
+  .flow-strip { gap: 8px; }
+  .flow-strip > div { padding: 11px 10px; gap: 8px; font-size: 13px; }
+}
+
+@media (max-width: 1040px) {
+  /* four stages across no longer fit: two rows of two keeps every label
+     readable rather than truncating all four */
+  .flow-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .decision-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .decision-metrics > div { display: block; }
+  .decision-metrics strong { font-size: 28px; }
+  .decision-metrics > div:first-child strong { font-size: 32px; }
+  .decision-metrics span { display: block; margin-top: 3px; font-size: 12px; }
+}
+
+@media (max-width: 900px) {
+  /* the controls column and the results stack rather than squeeze */
+  main { grid-template-columns: minmax(0, 1fr); }
+  .candidate-head { display: none; }
+  .candidate-row { grid-template-columns: 1.4fr 0.8fr; gap: 12px 14px; }
+  .candidate-row .risk-cell { grid-column: 1; }
+  .candidate-row .outcome { grid-column: 2; text-align: right; }
+  .ask-field input { font-size: 17px; padding: 16px 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { animation: none !important; transition: none !important; }
@@ -1461,9 +1489,14 @@ body:after {
   min-width: 0;
 }
 .onboard-col .onboard-card { flex: 0 0 auto; }
+/* Both shapes are sized from one value that tracks the viewport, so a narrower
+   laptop gets proportionally smaller shapes instead of the same fixed pixels
+   inside a narrower column. The box is sized from the shape rather than fixed,
+   so no dead height is left under it either. */
 .onboard-shape {
+  --shape: clamp(120px, 13vw, 200px);
   width: 100%;
-  height: 250px;
+  height: calc(var(--shape) * 1.25);
   margin-top: 16px;
   position: relative;
   pointer-events: none;
@@ -1474,33 +1507,33 @@ body:after {
 .onboard-shape.tri:before {
   content: "";
   position: absolute;
-  left: calc(50% - 46px);
+  left: calc(50% - var(--shape) * 0.23);
   top: 0px;
   transform: translateX(-50%);
   width: 0;
   height: 0;
-  border-left: 112px solid transparent;
-  border-right: 112px solid transparent;
-  border-bottom: 184px solid #e7e3fa;
+  border-left: calc(var(--shape) * 0.56) solid transparent;
+  border-right: calc(var(--shape) * 0.56) solid transparent;
+  border-bottom: calc(var(--shape) * 0.92) solid #e7e3fa;
 }
 /* a smaller one inside, offset, so it does not read as a flat block */
 .onboard-shape.tri:after {
   content: "";
   position: absolute;
-  left: calc(50% - 18px);
-  top: 60px;
+  left: calc(50% - var(--shape) * 0.09);
+  top: calc(var(--shape) * 0.30);
   transform: translateX(-50%);
   width: 0;
   height: 0;
-  border-left: 60px solid transparent;
-  border-right: 60px solid transparent;
-  border-bottom: 100px solid #d9d2f6;
+  border-left: calc(var(--shape) * 0.30) solid transparent;
+  border-right: calc(var(--shape) * 0.30) solid transparent;
+  border-bottom: calc(var(--shape) * 0.50) solid #d9d2f6;
 }
 
 /* under 03: a circle, for the balance the agent holds. It sits a little lower
    than the triangle — a circle's mass reads higher than a triangle's, so
    matching their top edges made it look raised. */
-.onboard-shape.circle { margin-top: 44px; }
+.onboard-shape.circle { margin-top: calc(var(--shape) * 0.22); }
 /* under 03: a circle, for the balance the agent holds */
 .onboard-shape.circle:before {
   content: "";
@@ -1508,19 +1541,19 @@ body:after {
   left: 50%;
   top: 0px;
   transform: translateX(-50%);
-  width: 200px;
-  height: 200px;
+  width: var(--shape);
+  height: var(--shape);
   border-radius: 50%;
   background: #dfeee4;
 }
 .onboard-shape.circle:after {
   content: "";
   position: absolute;
-  left: calc(50% + 52px);
-  top: 92px;
+  left: calc(50% + var(--shape) * 0.26);
+  top: calc(var(--shape) * 0.46);
   transform: translateX(-50%);
-  width: 92px;
-  height: 92px;
+  width: calc(var(--shape) * 0.46);
+  height: calc(var(--shape) * 0.46);
   border-radius: 50%;
   background: #c8e2d2;
 }
@@ -1587,10 +1620,11 @@ h1 { -webkit-user-select: none; user-select: none; }
    and is hidden entirely for anyone who asked for reduced motion. */
 
 .roller {
+  --shape: clamp(120px, 13vw, 200px);
   position: fixed;
   left: 0; top: 0;
   z-index: 3;
-  width: 200px; height: 200px;
+  width: var(--shape); height: var(--shape);
   border-radius: 50%;
   background: #dfeee4;
   pointer-events: none;
@@ -1601,7 +1635,7 @@ h1 { -webkit-user-select: none; user-select: none; }
   content: "";
   position: absolute;
   left: 58%; top: 50%;
-  width: 92px; height: 92px;
+  width: calc(var(--shape) * 0.46); height: calc(var(--shape) * 0.46);
   border-radius: 50%;
   background: #c8e2d2;
   transform: translateY(-50%);
