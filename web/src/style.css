@@ -82,7 +82,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
    names the page and then gets out of the way. */
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   text-decoration: none;
   font-size: 25px;
   font-weight: 500;
@@ -90,7 +90,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   line-height: 1;
   color: var(--ink);
 }
-.brand-mark { display: none; }
+/* the mark sits to the right of the name, centred against it. The lockup is
+   aligned on the baseline so the wordmark's own descender does not shift it,
+   so the mark is centred explicitly rather than inheriting that. */
+.brand-mark {
+  display: block;
+  width: 34px;
+  height: 34px;
+  margin-left: 12px;
+  align-self: center;
+  flex: none;
+}
 .brand small { display: none; }
 /* The accent belongs to the one number in the name, the same violet that
    marks a decision everywhere else. */
@@ -448,23 +458,6 @@ textarea { resize: vertical; font-size: 14px; line-height: 1.65; min-height: 108
 .status.running { color: var(--accent); border-color: #cfc6f0; background: var(--accent-wash); }
 .status.error, .status.held, .status.unknown { color: var(--warn); border-color: #e6d5ae; background: var(--warn-wash); }
 
-/* the four stages, as a strip that fills */
-.flow-strip {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  border: 1px solid var(--rule);
-  background: var(--paper);
-  margin-bottom: 20px;
-}
-.flow-strip > div {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
-  color: var(--faint);
-  padding: 12px 6px;
-  transition: color 0.3s var(--ease), background 0.3s var(--ease);
-}
-.flow-strip span { font-size: 11px; }
-.flow-strip .done { color: var(--ink); background: var(--card); }
-.flow-strip .done span { color: var(--accent); }
 
 .run-policy {
   display: flex; flex-wrap: wrap; gap: 9px 16px; align-items: center;
@@ -896,9 +889,7 @@ footer {
   transition: color 0.35s var(--ease), border-color 0.35s var(--ease), background 0.35s var(--ease);
   min-width: 0;
 }
-.flow-strip b { white-space: nowrap; }
-.flow-strip > div + div { border-left: 0; }
-.flow-strip b { font-weight: 400; letter-spacing: -0.01em; }
+.flow-strip b { white-space: nowrap; font-weight: 400; letter-spacing: -0.01em; }
 
 /* the marker: numbered while waiting, ticked once landed */
 .flow-orb {

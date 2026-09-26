@@ -295,8 +295,8 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
  <div class="shell">
   <header class="topbar">
    <a class="brand" href="/" aria-label="Decision402 home">
-    <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 21 7v6c0 4-5 7-9 9-4-2-9-5-9-9V7l9-4Z" stroke="currentColor" stroke-width="1.6"/><path d="m8 12 3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-    <span>Decision<span class="brand-number">402</span><small>AGENT PAYMENT CONTROL</small></span>
+    
+    <span>Decision<span class="brand-number">402</span><small>AGENT PAYMENT CONTROL</small></span><img class="brand-mark" src="/decision402-mark.png" alt="" width="40" height="40" />
    </a>
    <div class="header-right"><span class="connection"><i :class="{online:!!config}"></i>{{owner?shortAddress(owner):config?'Connect owner wallet':'Connecting'}}</span><span class="network"><i></i>Base Sepolia <b>TESTNET</b></span></div>
   </header>
