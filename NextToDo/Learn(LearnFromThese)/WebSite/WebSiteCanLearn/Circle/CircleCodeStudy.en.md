@@ -1,76 +1,71 @@
-# Circle: Where to Look and What to Learn
+# Circle: Features, Purchase Flow, and Source Code
 
-Checked: 2026-10-02. The direction is now to build it ourselves: study public code and product rules, then implement our own features. Do not integrate Circle CLI, hosted wallets, search, or Gateway services. A Circle account is not required to begin studying. [中文](CircleCodeStudy.md)
+Sources checked: 2026-10-03. [中文](CircleCodeStudy.md)
 
-“Build ourselves” describes planned work. New module names show where we intend to put the code, not features already implemented.
+## Responsibilities in order
 
-## Start with these pages
+| Order | Stage | Product or tool | Responsibility |
+|---|---|---|---|
+| 1 | Prepare tools | Circle CLI, Circle Skills | CLI supplies commands used throughout; optional Skills teaches AI tools how to call them. |
+| 2 | Wallet and rules | Agent Wallets | Create wallets, set spending/address limits, and sign purchases. |
+| 3 | Purchasing funds | Gateway | Accept deposited USDC as purchasing funds. |
+| 4 | Find services | Agent Marketplace | Return candidates; the agent or application chooses. |
+| 5 | Inspect quotes | CLI, provider | Read payment requirements and set the purchase cap. |
+| 6 | Sign | Agent Wallets, payment client | Build authorization, have the wallet sign it, and send it to the provider. |
+| 7 | Accept payment | Provider, Gateway | Submit authorization; Gateway verifies, locks buyer funds, and records pending seller funds. |
+| 8 | Deliver and settle | Provider, CLI, Gateway | Provider returns data, CLI displays it, and Gateway later batches settlement onchain. |
 
-| Page | What it contains |
+## Purchase steps: Agent Wallets + Marketplace + Gateway
+
+| Step | Who acts | What happens | Source |
+|---|---|---|---|
+| 1 | User, CLI | Log in with email and verification code; wallets are created after initial authentication | [Wallet tutorial](https://developers.circle.com/agent-stack/agent-wallets/quickstart) |
+| 2 | User, Agent Wallets | Set per-payment, daily, weekly, monthly, and address limits. Changes require verification. Mainnet only; spending windows roll over time | [Policy tutorial](https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/custom-policies) |
+| 3 | User, Gateway | Fund the wallet with USDC, deposit into Gateway, and confirm available funds. These first three steps can happen in advance | [Purchase tutorial](https://developers.circle.com/agent-stack/agent-nanopayments/quickstart) |
+| 4 | User, agent | User gives a task, such as weather lookup; the agent decides which tools to call | [Product description](https://www.circle.com/blog/introducing-circle-agent-stack-financial-infrastructure-for-the-agentic-economy) |
+| 5 | Agent, Marketplace | Use `services search` for candidates | [CLI tutorial](https://developers.circle.com/agent-stack/agent-nanopayments/quickstart) |
+| 6 | Agent, provider | Use `services inspect` for payment requirements. x402 providers return HTTP 402 with amount, asset, chain, and other details | [Buyer tutorial](https://developers.circle.com/gateway-nanopayments/quickstarts/buyer) |
+| 7 | Agent or application | Choose provider, wallet, chain, and `--max-amount`. The application decides how to rank providers | [CLI tutorial](https://developers.circle.com/agent-stack/agent-nanopayments/quickstart) |
+| 8 | Payment client, wallet | Start `services pay`; sign authorization based on payment requirements and request the resource with `PAYMENT-SIGNATURE` | [Buyer tutorial](https://developers.circle.com/gateway-nanopayments/quickstarts/buyer) |
+| 9 | Provider, Gateway | Submit authorization; Gateway verifies the signature, locks buyer funds, and records pending seller funds. Invalid payments are rejected | [Seller tutorial](https://developers.circle.com/gateway-nanopayments/quickstarts/seller) |
+| 10 | Provider, agent | After Gateway accepts payment, return data for CLI to display; check remaining funds. The application still needs to judge data usefulness | [Purchase tutorial](https://developers.circle.com/agent-stack/agent-nanopayments/quickstart) |
+| 11 | Gateway | Batch payments onchain; after confirmation, pending seller funds become available. Data can arrive before this step | [Settlement mechanism](https://developers.circle.com/gateway-nanopayments/concepts/batched-settlement) |
+
+## Alternative: Facilitator Service (separate from the Gateway path above)
+
+| Step | Who acts | What happens |
+|---|---|---|
+| 1 | Buyer, provider | Request a paid resource; provider returns an HTTP 402 quote |
+| 2 | Buyer wallet | Sign payment authorization and request the resource again |
+| 3 | Provider | Submit authorization and seller proof to Facilitator |
+| 4 | Facilitator | Validate authorization and screen both parties; reject invalid payments or submit the USDC transfer |
+| 5 | Provider | Deliver after confirmation; query pending payments. Retain the original authorization on retries rather than signing a new charge |
+| Sources | [Official flow](https://developers.circle.com/facilitator-service/how-it-works) | [Payment and status tutorial](https://developers.circle.com/facilitator-service/quickstart); status access belongs to the seller |
+
+## Distinctions that affect the comparison
+
+| Topic | Confirmed / unconfirmed |
 |---|---|
-| [Circle GitHub repositories](https://github.com/orgs/circlefin/repositories) | Public code. Search for the repository names listed below. |
-| [Agent Stack documentation](https://developers.circle.com/agent-stack) | The main entry point for wallets, payments, and service discovery. Look under “The agent stack” and “Dive deeper.” |
-| [Agent Marketplace](https://agents.circle.com) | Observe the fields shown in service listings. This is a product reference, not a project dependency. |
+| Risk checks | [Agent Wallets](https://developers.circle.com/agent-stack/agent-wallets) documents sanctions screening before transfers go onchain; [Facilitator](https://developers.circle.com/facilitator-service) screens both parties. Equivalent risk ranking and pre-signing rescans are unconfirmed. |
+| Gateway spending limits | [Wallet policies](https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/custom-policies) and `--max-amount` are documented. Whether wallet policies cover every Gateway purchase is unconfirmed. |
+| Payment and data | [Nanopayments](https://developers.circle.com/agent-stack/agent-nanopayments) handles payments. We have not found equivalent documentation for our proposed data-quality checks and automatic switching. |
 
-**Use the website to understand features and GitHub to study implementations. Code that calls a Circle API is not the implementation behind that API.**
+## Public code and where to look
 
-## 1. Wallets: creation, signing, and spending permissions
+| Topic | GitHub and location | Available code / limits |
+|---|---|---|
+| Web wallets | [modularwallets-web-sdk](https://github.com/circlefin/modularwallets-web-sdk): `examples/`, `packages/w3s-web-core-sdk/` | SDK, examples, and tests; not the complete Agent Wallets backend. |
+| Smart wallet permissions | [buidl-wallet-contracts](https://github.com/circlefin/buidl-wallet-contracts): `src/msca/` and tests | Smart accounts and permission plugins; not MPC key custody. |
+| Small purchases and history UI | [arc-nanopayments](https://github.com/circlefin/arc-nanopayments): [agent.mts](https://github.com/circlefin/arc-nanopayments/blob/master/agent.mts), [app](https://github.com/circlefin/arc-nanopayments/tree/master/app) | Buyer/seller examples and UI; calls Gateway, not its full settlement backend. |
+| Gateway contracts | [evm-gateway-contracts](https://github.com/circlefin/evm-gateway-contracts): `src/`, `test/`, `quickstart/` | Onchain contracts and tests; public availability of the full offchain backend is unconfirmed. [Product docs](https://developers.circle.com/gateway) |
+| Configure limits | [agent-wallet-policy](https://github.com/circlefin/skills/blob/master/plugins/circle/skills/agent-wallet-policy/SKILL.md) | Usage instructions; this file does not implement a spending ledger. |
+| Search services | [services.ts](https://github.com/circlefin/agent-stack-starter-kits/blob/master/packages/circle-tools/src/services.ts): `mapSearchItem`, `preferredAccept`, `searchServices` | Field mapping and CLI calls; not marketplace search or review backends. |
+| Agent integrations | [starter-kits/kits](https://github.com/circlefin/agent-stack-starter-kits/tree/master/kits) | Examples of agent frameworks calling Circle tools. |
+| Our existing open-source libraries (not Circle) | [x402 Go](https://github.com/x402-foundation/x402/tree/main/go), [facilitator](https://github.com/x402-foundation/x402/blob/main/go/FACILITATOR.md), [go-ethereum keystore](https://github.com/ethereum/go-ethereum/tree/master/accounts/keystore) | Payment, seller settlement, and encrypted key storage respectively. Check repository licenses before copying or modifying code. |
 
-- **Product overview:** [Agent Wallets](https://developers.circle.com/agent-stack/agent-wallets). Explains how agents use wallets and how users restrict them. The docs describe MPC key management, with key shares kept out of the agent's reach.
-- **Web SDK source:** [modularwallets-web-sdk](https://github.com/circlefin/modularwallets-web-sdk). Start with the README, then [examples](https://github.com/circlefin/modularwallets-web-sdk/tree/master/examples) and the [SDK directory](https://github.com/circlefin/modularwallets-web-sdk/tree/master/packages/w3s-web-core-sdk) to learn how to integrate smart wallets into a web app.
-- **Wallet contract source:** [buidl-wallet-contracts](https://github.com/circlefin/buidl-wallet-contracts). Start with [src/msca](https://github.com/circlefin/buidl-wallet-contracts/tree/master/src/msca) and the tests to learn about smart accounts and permission plugins.
-- **Build ourselves:** `wallet.go` for wallets, permissions, and signing; `keystore.go` for encrypted keys. Use Circle code to study module responsibilities. For ordinary EVM wallet storage, use the existing [go-ethereum keystore](https://github.com/ethereum/go-ethereum/tree/master/accounts/keystore). Do not build MPC in the first version.
-- **What this does not include:** Modular Wallets and Agent Wallets are not one complete shared product codebase. These two repositories do not let us copy Circle's account services, MPC signing infrastructure, and entire backend. The contract repository is marked GPL-3.0; read its license before copying code.
-
-## 2. Payments: how buyers pay and sellers receive money
-
-- **Tutorial:** [Make a nanopayment](https://developers.circle.com/agent-stack/agent-nanopayments/quickstart). Covers funding, service search, quote inspection, payment, and balance checks.
-- **Example source:** [arc-nanopayments](https://github.com/circlefin/arc-nanopayments). Read [agent.mts](https://github.com/circlefin/arc-nanopayments/blob/master/agent.mts), then [app](https://github.com/circlefin/arc-nanopayments/tree/master/app). Study buyer payments, paid seller endpoints, and payment history pages.
-- **Underlying system:** The [Gateway docs](https://developers.circle.com/gateway) explain a unified USDC balance. [evm-gateway-contracts](https://github.com/circlefin/evm-gateway-contracts) contains the related EVM contract source. Start with `src/`, `test/`, and `quickstart/`.
-- **Build ourselves:** Improve quotes, signing, payments, and records in `payment.go`. Keep the existing [x402 Go library](https://github.com/x402-foundation/x402/tree/main/go) without Circle Gateway API calls. If running our own demo settlement service, study the x402 facilitator documentation and source.
-- **What this does not include:** The Nanopayments example is described as a testnet app that needs changes for production use. Public Gateway contracts do not mean all its offchain services are included in the repository.
-
-## 3. Budgets: limits per payment, day, week, and month
-
-- **Product tutorial:** [Set spending policies](https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/custom-policies). Covers per-payment, daily, weekly, and monthly limits, plus recipient allowlists and blocklists.
-- **GitHub instructions:** [agent-wallet-policy/SKILL.md](https://github.com/circlefin/skills/blob/master/plugins/circle/skills/agent-wallet-policy/SKILL.md), in [circlefin/skills](https://github.com/circlefin/skills). Explains how to view, change, and reset limits. Changes require user verification. The current instructions apply only to mainnet Agent Wallets.
-- **Build ourselves:** Store rules in `policy.go` and check cumulative spending in `ledger.go`. Handle concurrent reservations, settled spending, and safe releases in the database. Learn the feature types from Circle, but use Beijing calendar-day limits in our first version without its limit API.
-- **What this does not include:** These are usage instructions, not the backend budget ledger source. They do not provide the implementation for concurrent spending, restart recovery, or task budgets. A spending total in a demo is not sufficient for strict budget enforcement either.
-
-## 4. Service discovery: finding providers, prices, and APIs
-
-- **Website:** [Agent Marketplace](https://agents.circle.com). Observe listing fields and the workflow without requiring its search service.
-- **Source:** [agent-stack-starter-kits](https://github.com/circlefin/agent-stack-starter-kits). Focus on [services.ts](https://github.com/circlefin/agent-stack-starter-kits/blob/master/packages/circle-tools/src/services.ts): it runs the search command and extracts service URLs, names, prices, chains, and request methods.
-- **Agent integration examples:** The same repository's [kits](https://github.com/circlefin/agent-stack-starter-kits/tree/master/kits) show how different agent frameworks call Circle tools.
-- **Build ourselves:** Collect two providers from their documentation into `providers.json`. Load and filter them in `providers.go`; read quotes directly with `Quote`. Learn field mapping from `mapSearchItem`, without copying the Circle CLI call in `searchServices`.
-- **What this does not include:** Public search-calling code does not mean the marketplace's listing, search engine, and review backend are fully public. Finding two services does not prove they are interchangeable; test them.
-
-## 5. Payment failures: avoiding a second charge
-
-- **Key tutorial:** [Facilitator Service quickstart](https://developers.circle.com/facilitator-service/quickstart). A facilitator helps sellers verify and settle payments.
-- **Read these steps first:** Step 3 for the payment identifier, step 4 for `pending` (the outcome is not yet known), and step 5 for status lookup.
-- **Build ourselves:** Use `reconcile.go` to retain and look up the original authorization, check transactions and events through chain RPC, and resume after restart. Learn the rule to keep checking unknown outcomes without charging again; do not call Circle's lookup service.
-- **What this does not include:** This is an API tutorial using Arc testnet. Status queries require seller proof, so we cannot assume buyers have the same access. This review has not confirmed a public repository for the complete backend.
-
-## 6. Risk controls: screening does not establish full equivalence
-
-Additional check on 2026-10-03: [Agent Wallets](https://developers.circle.com/agent-stack/agent-wallets) documents transfer sanctions screening; [Facilitator Service](https://developers.circle.com/facilitator-service) documents screening both parties. We therefore cannot say Circle lacks risk interception. Equivalent task-specific data-quality comparison and automatic provider replacement remain unconfirmed.
-
-Sanctions screening checks for restricted parties; it does not check whether purchased data is useful. Public source for the exact risk algorithms and full backend remains unconfirmed.
-
-## 7. How the products fit together
-
-- **User and wallet:** The user sets rules; Agent Wallets manages wallets and signing.
-- **Finding services:** The agent uses Circle CLI to search Marketplace and inspect quotes.
-- **Different payment paths:** Nanopayments uses Gateway balances and batched settlement. Facilitator Service helps sellers verify buyer signatures, screen both parties, submit onchain payments, and query results. One does not have to follow the other. [Nanopayments](https://developers.circle.com/agent-stack/agent-nanopayments) / [Facilitator](https://developers.circle.com/facilitator-service)
-
-The limits documentation describes mainnet and rolling time windows, not our planned Beijing calendar-day reset. Do not assume the same controls cover every payment path; check each one.
-
-## Suggested reading order
-
-1. **Field mapping in `services.ts`:** write our service configuration and quote lookup.
-2. **Wallet SDK examples and tests:** write our wallet module and encrypted storage; there is no need to read every contract first.
-3. **Limit and payment-failure documentation:** write our ledger and recovery flow. Those backend implementations are not included in the instructions.
-4. **Payment examples and UI:** improve our x402 payments and Vue result page without copying Gateway calls.
-
-For each resource, record **inputs, checks, outputs, and where we will implement it.** Read the license before copying or modifying code. Follow [HowToImprove](../../../../HowToImprove/HowToImprove.en.md) for the full work order.
+| Entry point | Link |
+|---|---|
+| Official documentation | [Agent Stack](https://developers.circle.com/agent-stack) |
+| Public repositories | [circlefin](https://github.com/orgs/circlefin/repositories) |
+| Service directory | [Marketplace](https://agents.circle.com) |
+| Our changes | [HowToImprove](../../../../HowToImprove/HowToImprove.en.md) |
