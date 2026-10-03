@@ -1,6 +1,6 @@
 # Decision402: Build It Ourselves, Learn from Circle's Code
 
-Updated: 2026-10-02. This is a pending work plan, not an implemented change. [中文](HowToImprove.md)
+Updated: 2026-10-03. This is a pending work plan, not an implemented change. [中文](HowToImprove.md)
 
 ## Make the direction clear
 
@@ -8,7 +8,9 @@ Updated: 2026-10-02. This is a pending work plan, not an implemented change. [�
 
 Keep the existing Go, Vue, x402, and go-ethereum libraries. Write the application logic ourselves; do not invent new signing or encryption algorithms. USDC and Arc remain part of the current project goals. The model, RPC, and risk-data services remain external dependencies; this round does not rebuild them too.
 
-Order: **preserve the working version → find two real providers → improve key storage → add budgets → add payment recovery → improve our payment flow → validate delivery and switch providers → user trials.**
+Order: **preserve V1.0, reproduce and fix critical bugs → review the five responsibilities and compare Circle → find two real providers → improve key storage → add budgets → add payment recovery → improve payment → validate delivery and switch providers → user trials.**
+
+See [V1.0](<../Version/V1.0(ETHGlobalTokyo2026Hackathon)/V1.0.en.md>) for the five responsibilities and [Think](<../Think(SomeIdeas)/Think(SomeIdeas).en.md>) for product direction. Separate responsibilities inside the existing Go project and check the full purchase flow after each change. Include wallets, spending records, recovery, and data checks.
 
 Do not learn all of Circle before starting. Read only the code needed for the next step, write our implementation, and test it. Distinguish actual implementations from calls to Circle's backend. Translating a service call into Go does not recreate that backend.
 
@@ -31,7 +33,11 @@ DECISION402_LIVE_TEST=0 go test ./...
 npm --prefix web run build
 ```
 
-**Done when:** The starting version and check results are recorded. For each later step, record what we studied, changed, and tested in `docs/improvement-log.md`. Create it during implementation and keep credentials out.
+- [ ] Record reproducible bugs with actions, expected results, actual results, and reproduction steps. Fix money, authorization, and core-flow blockers first, with corresponding regression checks. Queue other issues and track missing features separately.
+
+- [ ] Find the code for each of V1.0's five responsibilities. Before changing one part, record current behavior, the Circle reference, files to change, and checks to run. Complete one part before changing the next.
+
+**Done when:** Record the starting version, check results, and change scope. Fix critical bugs before payment trials. For each later step, record what we studied, changed, and tested in `docs/improvement-log.md`. Create it during implementation and keep credentials out.
 
 ## 1. Build our service list, starting with two real providers
 
@@ -49,7 +55,7 @@ npm --prefix web run build
 
 ## 2. Build wallet management, starting with encrypted keys and signing permissions
 
-**Read first:** Examples and tests in the [Modular Wallets SDK](https://github.com/circlefin/modularwallets-web-sdk) to see how wallet operations are separated from UI code. Review the [wallet contracts](https://github.com/circlefin/buidl-wallet-contracts/tree/master/src/msca) for where permission checks happen. These are not Circle's complete MPC wallet backend.
+**Read first:** Examples and tests in the [Modular Wallets SDK](https://github.com/circlefin/modularwallets-web-sdk) to see how wallet operations are separated from UI code. Review the [wallet contracts](https://github.com/circlefin/buidl-wallet-contracts/tree/master/src/msca) for where permission checks happen. MPC splits key management across parties; these repositories are not Circle's complete wallet backend.
 
 **Implementation order:**
 
@@ -69,7 +75,7 @@ npm --prefix web run build
 
 1. Add a daily agent cap in [policy.go](../../internal/agent/policy.go), with a shared overall cap per wallet. Keep per-payment and task limits. Leave weekly and monthly limits for later.
 2. Add `internal/agent/ledger.go`, initially using SQLite. Store the task, agent, wallet, integer amount, payment ID, authorization ID, time, and status.
-3. Connect it to `beforeSign` in [payment.go](../../internal/agent/payment.go): check and reserve budget in one database transaction. A failed write prevents signing. Save the complete authorization parameters before sending each signed authorization.
+3. Connect it to `beforeSign` in [payment.go](../../internal/agent/payment.go): check remaining funds and reserve the amount in one database operation, so both succeed or both fail. A failed write prevents signing. Save the complete authorization parameters before sending each signed authorization.
 4. Settled payments become spent budget; unknown outcomes stay reserved. Release only after confirming no payment occurred and the original authorization can no longer charge. Repeated updates must not charge or release twice. Provider switching uses the same task budget.
 5. Use Beijing time for daily accounting. Unresolved payments crossing midnight remain reserved. Show API budgets, model costs, and network fees separately.
 
@@ -81,8 +87,8 @@ npm --prefix web run build
 
 **Implementation order:**
 
-1. Extend `Task` in [app.go](../../internal/agent/app.go) and `PaymentOutcome` in [payment.go](../../internal/agent/payment.go). Store the payment ID, authorization nonce, validity window, amount, sender, and recipient. Duplicate submissions return the original task; changed amounts or recipients are rejected.
-2. Add `internal/agent/reconcile.go`. Query transaction receipts, authorization state, and events through the target chain's RPC. Without a transaction hash, search using the saved authorization ID and block range. Match the chain, token, sender, recipient, and amount, and apply the chain's confirmation rules before recording settlement.
+1. Extend `Task` in [app.go](../../internal/agent/app.go) and `PaymentOutcome` in [payment.go](../../internal/agent/payment.go). Store the payment ID, authorization nonce (a value used to prevent reuse), validity window, amount, sender, and recipient. Duplicate submissions return the original task; changed amounts or recipients are rejected.
+2. Add `internal/agent/reconcile.go`. Query transaction receipts, authorization state, and events through the target chain's RPC, an interface for querying the blockchain. Without a transaction hash, search using the saved authorization ID and block range. Match the chain, token, sender, recipient, and amount, and apply the chain's confirmation rules before recording settlement.
 3. A missing transaction, RPC timeout, or used authorization does not establish the payment outcome by itself. Match payment or cancellation evidence. Release budget only after confirming failure or expiry with no possible later settlement; otherwise keep the outcome unknown.
 4. Update `NewApp` to resume payment lookup after restart, without signing again. After ledger and recovery tests pass, replace global blocking in `createTask` and the global lock in `run` with per-wallet handling.
 
@@ -95,7 +101,7 @@ npm --prefix web run build
 **Implementation order:**
 
 1. Keep the existing x402 `exact` approach. Make the sequence in [payment.go](../../internal/agent/payment.go) explicit: **read quote → check recipient and amount → fresh risk check → reserve budget → save authorization and sign → send request → reconcile → update records.** Our Go code controls each decision.
-2. Test success, changed quotes, changed recipients, exceeded limits, unknown risk, and connection loss after signing. Model or provider text must not change the rules.
+2. Test success, changed quotes or recipients, exceeded limits, unknown risk, and connection loss after signing. Give risk checks a separate interface and retain their source, time, and reason. Stop on timeouts, missing fields, or stale results. Model or provider text must not change the rules.
 3. Separate buyer and seller responsibilities. When buying another provider's API, the seller submits settlement; we retain the authorization and independently check the outcome. We do not control the seller's infrastructure and must not count it as our own implementation.
 4. To run our own demo seller's settlement as well, add `cmd/facilitator` using the open-source x402 facilitator components. Run verification, transaction submission, and status storage ourselves. Replace the hardcoded `https://x402.org/facilitator` in `SellerHandler` with configuration pointing to our service. This is additional seller-side work: separately test duplicate submissions, restart, insufficient gas funds, and failed transactions. Do not copy Circle's hosted service integration.
 5. Do not rebuild Gateway batching or crosschain systems for the first version. Test the target chain, USDC contract, signing format, settlement, and risk data individually. Changing the chain ID alone does not establish Arc support.
@@ -123,6 +129,12 @@ npm --prefix web run build
 
 - [ ] **Done when:** Actual records explain what users save and at what cost. Building it ourselves or completing a feature list cannot replace this step.
 
+## Before opening to more users
+
+- [ ] Test concurrent users, restarts, and backup recovery. User A cannot access B's wallet; failures must not cause duplicate charges or overspending.
+- [ ] Set failure alerts and assign someone to handle them. Track success, cost, response time, and manual work. Start with a few users, then grow gradually.
+- [ ] Pass full-flow and failure tests before expanding. A passing module test alone does not establish readiness for commercial use.
+
 ## How to take notes when studying Circle
 
 For each file, record four things: **inputs, checks, outputs, and where we will implement it.** Read the source and tests, write our version, then test our own failure cases. Code that calls an external SDK is not the SDK or backend implementation. Check licenses before copying or modifying code; changing languages does not automatically remove license obligations.
@@ -138,4 +150,4 @@ Treat the Arc application as a separate goal. The [event page](https://community
 
 More source links are in the [Circle study notes](<../Learn(LearnFromThese)/WebSite/WebSiteCanLearn/Circle/CircleCodeStudy.en.md>); optional ideas are in [Think](<../Think(SomeIdeas)/Think(SomeIdeas).en.md>).
 
-**Start now: run step 0's checks, read the data-mapping parts of `services.ts`, then write the two-provider comparison and our service configuration.**
+**Start now: run step 0's checks, record bugs, and find the code for V1.0's five responsibilities. Then read `services.ts` and write the two-provider comparison.**

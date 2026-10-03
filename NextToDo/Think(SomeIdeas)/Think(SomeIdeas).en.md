@@ -1,43 +1,33 @@
-# A Few Ideas to Try
+# What to Build Next and Which Ideas to Try
 
-Updated: 2026-10-02. [中文](<Think(SomeIdeas).md>)
+Updated: 2026-10-03. [中文](<Think(SomeIdeas).md>)
 
-Items 1–2 describe the preview and result pages already covered by the main plan; implement them together, without duplicate work. Items 3–5 are optional. Pick one after the core flow works. Follow [HowToImprove](../HowToImprove/HowToImprove.en.md) for the work order.
+## Direction first
 
-## 1. Show the purchase plan before spending
+**Make one real purchasing flow reliable before adding complex features.** We build our wallets, budgets, payments, and provider selection. Circle is a learning reference; we do not use its hosted services.
 
-The UI already has a `preview` mode. After adding real providers, improve it to show candidate providers, prices, risk results, and the selection reason. Keep it free of signing and payments.
+- Five responsibilities: set user rules, find services, select by rules, check risk, and execute payment. See [V1.0](<../Version/V1.0(ETHGlobalTokyo2026Hackathon)/V1.0.en.md>) for current behavior and [HowToImprove](../HowToImprove/HowToImprove.en.md) for tasks.
+- Separate responsibilities inside the existing Go project first, without splitting into multiple services. Keep the full purchasing flow working after each change.
+- Also improve key storage, cumulative spending records, failure recovery, and data checks. The interceptor is one part of risk checking, not the whole product. Its data source can be replaced later.
+- Compare Circle using four questions: what do we do now, what does it offer, what is missing, and how will we check the change? It already has sanctions screening, so risk interception alone is not unique to us.
+- Complex innovation can wait, but real tasks must be found early. Completing the feature list does not establish demand.
 
-**Try it:** Ask two developers to use their own tasks and see whether they want to enable automatic purchasing afterward.
+## Five ideas to try
 
-## 2. Give each purchase a clear result card
+Build the first two with the main plan. Consider the others once purchasing works reliably.
 
-Show what was bought, from whom, how much it cost, and whether the data is usable. If the provider changed, explain why and include the payment record.
+| Idea | What to do | How to check its value |
+|---|---|---|
+| Improve existing preview | Show provider, price, risk, and selection reason without signing or paying | Two developers understand it and want to continue trying it |
+| Explain purchase results | Show what was bought, cost, data checks, and failure reasons | Users can understand failure records without our help |
+| Let other agents call it | Offer one API that takes tasks and returns data and cost, within existing authorization | One developer can connect it to their own project |
+| Track provider results | Record success, stale data, price, and time before changing selection | Records explain problems and later changes improve results |
+| Share a demo for feedback | Show actual capabilities; record each task, problem, and reproduction steps | Feedback comes from real tasks, and users return |
 
-**Try it:** Let a user read a failed task's record on their own. If they still need us to explain it, improve the wording.
+## When to adjust
 
-## 3. Let other agents use our features
+- No two services with suitable functions and payment methods within two days: change the use case before building a large marketplace.
+- One fixed provider is enough: prioritize budgets and payment recovery over complex AI selection.
+- Existing products already meet the need: ask what is missing before deciding what to build.
 
-Start with one API that accepts the task, budget, and allowed services, then returns data and spending details. Callers may only reduce the budget and service scope within the user's existing authorization, never expand permissions. The backend still enforces payment rules.
-
-**Try it:** Connect only two comparable APIs. Ask one developer to integrate it into an existing project and record the time taken and any difficulties.
-
-## 4. Track which providers cause problems
-
-Record successful requests, stale responses, prices, and response times for each provider. Collect enough records before lowering a provider's priority. One failure does not establish that it is unreliable.
-
-**Try it:** Start by recording results without changing payment choices. Check whether the records explain the problems users encounter.
-
-## 5. Show the project publicly and invite criticism
-
-This is worth trying. Show what actually works and welcome criticism. For each report, record the user's task, what failed, its impact, and how to reproduce it. Prioritize recurring problems that affect real use.
-
-**Try it:** First publish a preview demo that does not use real money. Invite target developers to use it and turn their feedback into tasks. Track repeat users as well as comments.
-
-## When to change direction
-
-- No two suitable providers with matching use cases and payment methods within two days: choose another use case instead of building a marketplace first.
-- A fixed provider is enough: focus on budgets and payment recovery, and postpone complex AI selection.
-- Circle already solves the user's problem: ask what is still missing before deciding what to build next.
-
-What we need to prove is simple: **users can get useful data with less hassle and without wasting money.**
+**Confidence so far:** Code limitations have evidence; these product ideas still need user trials. First check whether they reduce failures, manual work, and wasted spending. Commercial success is not established.

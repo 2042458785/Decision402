@@ -1,6 +1,6 @@
 # Decision402：自己实现，参考 Circle 的代码
 
-更新：2026-10-02。本文是待办计划，尚未实施。[English](HowToImprove.en.md)
+更新：2026-10-03。本文是待办计划，尚未实施。[English](HowToImprove.en.md)
 
 ## 先把方向说清楚
 
@@ -8,7 +8,9 @@
 
 保留现有 Go、Vue、x402 和 go-ethereum 开源库；业务自己写，签名和加密不另造算法。USDC 和 Arc 仍按现有项目目标保留。现有模型、RPC 和风险数据服务也是外部依赖，本次不把它们一起重写。
 
-顺序：**保留能工作的版本 → 找两家真实服务 → 改钱包保管 → 补预算 → 补查账恢复 → 完善自己的付款流程 → 验收数据和换商家 → 用户试用。**
+顺序：**固定 V1.0、复现并优先修关键 Bug → 看清五部分分工、对照 Circle → 找两家真实服务 → 改钱包保管 → 补预算 → 补查账恢复 → 完善付款流程 → 验收数据和换商家 → 用户试用。**
+
+现有五部分分工见 [V1.0](<../Version/V1.0(ETHGlobalTokyo2026Hackathon)/V1.0.md>)，产品方向见 [Think](<../Think(SomeIdeas)/Think(SomeIdeas).md>)。先在现有 Go 项目里分清职责，每改一部分都检查完整购买流程。钱包、账本、恢复和数据检查也要一起做好。
 
 不是先学完 Circle 再动手。每次只读下一步需要的代码，写出自己的实现并测试。阅读时分清：哪些是真正的实现，哪些只是调用 Circle 后台。照着调用代码翻译成 Go，并不能得到那个后台。
 
@@ -31,7 +33,11 @@ DECISION402_LIVE_TEST=0 go test ./...
 npm --prefix web run build
 ```
 
-**完成标准：** 留下原版本及检查结果。后续每步在 `docs/improvement-log.md` 记录“参考了什么、改了什么、测试结果”（实施时新建，不放凭据）。
+- [ ] 记录可复现 Bug 的操作、预期、实际结果和复现方法；资金、越权或阻断主流程的问题先修，并补对应回归检查。其他问题排队，缺功能另记待办。
+
+- [ ] 按 V1.0 的五部分找到对应代码。每改一部分，先写清“现在怎么做、参考 Circle 什么、改哪个文件、怎么检查”；一部分改完再改下一部分。
+
+**完成标准：** 留下原版本、检查结果和修改范围；关键 Bug 修好前，不进入付款试用。后续每步在 `docs/improvement-log.md` 记录“参考了什么、改了什么、测试结果”（实施时新建，不放凭据）。
 
 ## 1. 自己做服务列表，先放进两家真实商家
 
@@ -49,7 +55,7 @@ npm --prefix web run build
 
 ## 2. 自己做钱包管理，先解决明文密钥和签名权限
 
-**先读：** [Modular Wallets SDK](https://github.com/circlefin/modularwallets-web-sdk) 的示例和测试，学习钱包操作怎样与页面分开；[钱包合约](https://github.com/circlefin/buidl-wallet-contracts/tree/master/src/msca)了解权限检查放在哪里。它们不是 Circle 的完整 MPC 钱包后台。
+**先读：** [Modular Wallets SDK](https://github.com/circlefin/modularwallets-web-sdk) 的示例和测试，学习钱包操作怎样与页面分开；[钱包合约](https://github.com/circlefin/buidl-wallet-contracts/tree/master/src/msca)了解权限检查放在哪里。MPC 是把密钥分开保管的技术；这些仓库不是 Circle 的完整钱包后台。
 
 **动手顺序：**
 
@@ -69,7 +75,7 @@ npm --prefix web run build
 
 1. 在 [policy.go](../../internal/agent/policy.go) 增加 Agent 每日额度，同钱包共用总上限；保留单笔、任务额度。第一版先不加周、月额度。
 2. 新增 `internal/agent/ledger.go`，先用 SQLite。保存任务、Agent、钱包、整数金额、付款编号、授权标识、时间和状态。
-3. 接到 [payment.go](../../internal/agent/payment.go) 的 `beforeSign`：同一次数据库事务里检查额度并占用；数据库写入失败就不签名。每个签名授权的完整参数必须在发送前保存。
+3. 接到 [payment.go](../../internal/agent/payment.go) 的 `beforeSign`：把“检查剩余额度”和“占用额度”放进同一次数据库操作，一起成功或失败；写入失败就不签名。每个签名授权的完整参数必须在发送前保存。
 4. 已付记为花费；未知继续占额度；确认未支付且原授权不能再扣款才释放。重复更新不能多扣或多退；换商家也使用同一任务预算。
 5. 按北京时间记每日花费，跨午夜未知付款仍占额度。API 预算、模型费和链上手续费分开显示。
 
@@ -81,8 +87,8 @@ npm --prefix web run build
 
 **动手顺序：**
 
-1. 扩展 [app.go](../../internal/agent/app.go) 的 `Task` 和 [payment.go](../../internal/agent/payment.go) 的 `PaymentOutcome`，保存付款编号、授权 nonce、有效期、金额和双方地址。重复提交返回原任务，改金额或收款人则拒绝。
-2. 新增 `internal/agent/reconcile.go`，通过目标链 RPC 查询交易回执、授权状态和事件；没有交易哈希时，按已保存的授权标识和区块范围查找。核对实际转账的链、币种、双方地址及金额，按该链确认规则记账。
+1. 扩展 [app.go](../../internal/agent/app.go) 的 `Task` 和 [payment.go](../../internal/agent/payment.go) 的 `PaymentOutcome`，保存付款编号、授权 nonce（防止重复使用的编号）、有效期、金额和双方地址。重复提交返回原任务，改金额或收款人则拒绝。
+2. 新增 `internal/agent/reconcile.go`，通过目标链 RPC（查询区块链的接口）查询交易回执、授权状态和事件；没有交易哈希时，按已保存的授权标识和区块范围查找。核对实际转账的链、币种、双方地址及金额，按该链确认规则记账。
 3. “没查到交易”“RPC 超时”“授权已使用”都不能单独推导出付款结果；需要匹配到付款或撤销证据。确认失败／过期且不会再结算，才释放额度，否则保持未知。
 4. 修改 `NewApp`：启动后继续查未完成付款，不重新签名付款。账本和恢复测试通过后，再把 `createTask` 的全局阻塞、`run` 的全局锁改成按钱包处理。
 
@@ -95,7 +101,7 @@ npm --prefix web run build
 **动手顺序：**
 
 1. 保留现有 x402 `exact` 路线。固定 [payment.go](../../internal/agent/payment.go) 的顺序：**读报价 → 检查收款人和金额 → 最新风险检查 → 占用预算 → 保存授权并签名 → 发请求 → 查账 → 更新记录。** 所有决定由我们的 Go 代码执行。
-2. 给自己的付款模块补成功、报价变更、换收款人、超限、风险未知、签名后断网等测试。模型或商家返回的文字不能改变规则。
+2. 给付款模块补成功、报价变更、换收款人、超限、风险未知、签名后断网等测试。风险检查单独提供接口，保留数据来源、检查时间和原因；超时、缺字段、结果过期就停止。模型或商家文字不能改规则。
 3. 区分买方与卖方：买别人的 API，商家负责提交结算；我们保存授权并独立查账。商家内部用什么设施不由买方决定，不能把它算作我们的自研成果。
 4. 如果要把自己的演示卖方也完全自运行：用 x402 开源 facilitator 组件新增 `cmd/facilitator`，自己运行验证、提交交易和状态记录。把 `SellerHandler` 当前写死的 `https://x402.org/facilitator` 改成配置，指向自己的服务。这是额外的卖方工作，单独测试重复提交、重启、手续费余额不足和失败交易，不复制 Circle 的托管服务。
 5. 不为首版重写 Gateway 批量结算或跨链系统。目标链、USDC 合约、签名格式、结算和风险数据是否匹配，逐项实测；Arc 不能只改链 ID 就算完成。
@@ -123,6 +129,12 @@ npm --prefix web run build
 
 - [ ] **完成标准：** 能用真实记录说明用户省了什么、代价是多少。自研和功能齐全都不能替代这一步。
 
+## 开放给更多用户前
+
+- [ ] 测试多个用户同时使用、服务重启和备份恢复；A 用户不能动 B 的钱包，故障不能造成重复付款或超支。
+- [ ] 配好失败报警和处理人，记录成功率、费用、响应时间、人工处理次数；先少量用户试用，再逐步增加人数。
+- [ ] 完整流程和故障测试都通过，才考虑扩大使用。不能只凭某个模块测试通过就宣布“可以商用”。
+
 ## 学 Circle 时具体怎么记
 
 每个文件只留下四项：**输入是什么、检查了什么、输出是什么、我们在哪个文件实现。** 先看源码及测试，再写自己的版本，最后用自己的失败案例检查。调用外部 SDK 的那一层不等于 SDK 或后台源码；复制或修改代码前检查许可证，换语言也不能自动免除许可证要求。
@@ -138,4 +150,4 @@ Arc 申请作为单独目标：[活动页面](https://community.arc.io/public/ev
 
 更多源码入口见 [Circle 学习笔记](<../Learn(LearnFromThese)/WebSite/WebSiteCanLearn/Circle/CircleCodeStudy.md>)；额外想法见 [Think](<../Think(SomeIdeas)/Think(SomeIdeas).md>)。
 
-**现在就做：跑第 0 步检查，读 `services.ts` 的数据整理部分，然后写两家候选表和自己的服务配置。**
+**现在就做：跑第 0 步检查，记录 Bug，按 V1.0 五部分找到代码；接着读 `services.ts`，写两家候选表。**

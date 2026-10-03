@@ -52,6 +52,20 @@ Checked: 2026-10-02. The direction is now to build it ourselves: study public co
 - **Build ourselves:** Use `reconcile.go` to retain and look up the original authorization, check transactions and events through chain RPC, and resume after restart. Learn the rule to keep checking unknown outcomes without charging again; do not call Circle's lookup service.
 - **What this does not include:** This is an API tutorial using Arc testnet. Status queries require seller proof, so we cannot assume buyers have the same access. This review has not confirmed a public repository for the complete backend.
 
+## 6. Risk controls: screening does not establish full equivalence
+
+Additional check on 2026-10-03: [Agent Wallets](https://developers.circle.com/agent-stack/agent-wallets) documents transfer sanctions screening; [Facilitator Service](https://developers.circle.com/facilitator-service) documents screening both parties. We therefore cannot say Circle lacks risk interception. Equivalent task-specific data-quality comparison and automatic provider replacement remain unconfirmed.
+
+Sanctions screening checks for restricted parties; it does not check whether purchased data is useful. Public source for the exact risk algorithms and full backend remains unconfirmed.
+
+## 7. How the products fit together
+
+- **User and wallet:** The user sets rules; Agent Wallets manages wallets and signing.
+- **Finding services:** The agent uses Circle CLI to search Marketplace and inspect quotes.
+- **Different payment paths:** Nanopayments uses Gateway balances and batched settlement. Facilitator Service helps sellers verify buyer signatures, screen both parties, submit onchain payments, and query results. One does not have to follow the other. [Nanopayments](https://developers.circle.com/agent-stack/agent-nanopayments) / [Facilitator](https://developers.circle.com/facilitator-service)
+
+The limits documentation describes mainnet and rolling time windows, not our planned Beijing calendar-day reset. Do not assume the same controls cover every payment path; check each one.
+
 ## Suggested reading order
 
 1. **Field mapping in `services.ts`:** write our service configuration and quote lookup.

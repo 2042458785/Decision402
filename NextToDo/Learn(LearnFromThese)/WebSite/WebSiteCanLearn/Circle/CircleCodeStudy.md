@@ -52,6 +52,20 @@
 - **我们自己写：** `reconcile.go` 保存并查询原授权，通过目标链 RPC 核对交易和事件，重启后继续查。只借鉴教程里的“未知就继续查、不能新扣一次”，不调用 Circle 的查询服务。
 - **别混淆：** 这是服务接口教程，使用 Arc 测试网，查询需要卖方证明；我们作为买方不能直接假设有同样的查询权限。完整后台源码本次尚未确认公开。
 
+## 6. 风险能力：有筛查，不等于完整等价
+
+2026-10-03 补充核对：[Agent Wallets](https://developers.circle.com/agent-stack/agent-wallets) 明确说明转账制裁筛查；[Facilitator Service](https://developers.circle.com/facilitator-service) 明确说明筛查买卖双方。因此不能说 Circle 没有风险拦截。它是否能按我们的任务要求比较数据质量并自动换商家，本次未确认。
+
+制裁筛查是检查交易方是否涉及受限制对象，不等于检查购买的数据是否有用。具体风险算法和完整后台源码仍未确认公开。
+
+## 7. 这些产品怎么连起来
+
+- **用户和钱包：** 用户设置规则，Agent Wallets 管理钱包和签名。
+- **找服务：** Agent 通过 Circle CLI 搜索 Marketplace，查看商家的报价。
+- **付款有不同路径：** Nanopayments 使用 Gateway 余额并批量结算；Facilitator Service 帮卖家验证买方签名、筛查双方、提交链上付款和查询结果。不是先经过前者再经过后者。[Nanopayments](https://developers.circle.com/agent-stack/agent-nanopayments)／[Facilitator](https://developers.circle.com/facilitator-service)
+
+额度文档说的是主网、滚动时间窗口；不要直接当作我们计划的“北京时间每天重置”。也不能假定所有支付路径都受同一组限制，学习时逐项核对。
+
 ## 建议阅读顺序
 
 1. **`services.ts` 的字段整理：** 写自己的服务配置和报价读取。
