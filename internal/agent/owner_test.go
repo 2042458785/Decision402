@@ -15,15 +15,17 @@ import (
 
 	"github.com/x402-foundation/x402/go/v2/types"
 
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tasks")
-	a, err := NewApp("127.0.0.1:8080", dir, "unused", NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", dir, NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"}, testPayTo, testRisk)
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.scryptN, a.scryptP = keystore.LightScryptN, keystore.LightScryptP
 	handler := a.Handler(t.TempDir())
 	call := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
@@ -87,7 +89,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe session cookie")
 	}
-	createBody := `{"name":"Tokyo buyer","model_url":"https://api.deepseek.com","model_name":"deepseek-flash","model_api_key":"agent-model-secret"}`
+	createBody := `{"name":"Tokyo buyer","model_url":"https://api.deepseek.com","model_name":"deepseek-flash","model_api_key":"agent-model-secret","password":"test-wallet-password"}`
 	if got := call("POST", "/api/agents", createBody, nil); got.Code != 401 {
 		t.Fatal("agent creation without owner session")
 	}
@@ -99,7 +101,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &view); err != nil || view.Owner != owner || !addressPattern.MatchString(view.Wallet) {
 		t.Fatal("invalid agent view")
 	}
-	for _, ext := range []string{".json", ".key"} {
+	for _, ext := range []string{".json"} {
 		file := filepath.Join(filepath.Dir(dir), "agents", view.ID+ext)
 		info, err := os.Stat(file)
 		if err != nil || info.Mode().Perm() != 0600 {
@@ -113,7 +115,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	if list.Code != 200 || strings.Contains(list.Body.String(), "agent-model-secret") {
 		t.Fatal("agent list leaked key")
 	}
-	reloaded, err := NewApp(a.host, dir, "unused", a.model, a.scanner, testPayTo, testRisk)
+	reloaded, err := NewApp(a.host, dir, a.model, a.scanner, testPayTo, testRisk)
 	if err != nil || reloaded.agents[view.ID].Wallet != view.Wallet {
 		t.Fatalf("wallet did not survive restart: %v", err)
 	}
@@ -180,7 +182,12 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	a.agents[view.ID] = configured
 	payRequest := TaskRequest{ID: "test-agent-payment-01", AgentID: view.ID, Instruction: "Tokyo weather", Mode: "pay", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}}
 	a.tasks[payRequest.ID] = &Task{Request: payRequest, Status: "queued", Events: []Event{}, Candidates: []Candidate{}}
-	a.run(payRequest)
+	unlocked := call("POST", "/api/agents/"+view.ID+"/unlock", `{"password":"test-wallet-password"}`, cookie)
+	if unlocked.Code != 200 {
+		t.Fatalf("unlock failed: %s", unlocked.Body.String())
+	}
+	a.run(payRequest, a.grants[view.ID])
+	a.lockWallet(view.ID)
 	result := a.tasks[payRequest.ID]
 	if result.Status != "settled" || result.Payment == nil || !result.Payment.Settled || paid.Load() != 1 {
 		t.Fatalf("agent payment did not settle with generated wallet: status=%s paid=%d summary=%s error=%s payment=%+v", result.Status, paid.Load(), result.Summary, result.Error, result.Payment)

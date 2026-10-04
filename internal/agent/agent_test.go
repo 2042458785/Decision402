@@ -3,14 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -58,13 +55,17 @@ func TestPolicyPreferencesAndLimits(t *testing.T) {
 }
 
 type scannerStub struct {
-	action string
-	level  int
-	calls  int
+	action   string
+	level    int
+	calls    int
+	onScreen func()
 }
 
 func (s *scannerStub) Screen(_ context.Context, address string) probe.Decision {
 	s.calls++
+	if s.onScreen != nil {
+		s.onScreen()
+	}
 	score := 0
 	traits := []probe.Trait{}
 	if s.action == "deny" {
@@ -77,7 +78,7 @@ func (s *scannerStub) Screen(_ context.Context, address string) probe.Decision {
 	return probe.Decision{Action: s.action, Level: s.level, Address: address, ToxicScore: &score, Traits: traits}
 }
 func TestPayFinalGateAndReceipt(t *testing.T) {
-	for _, name := range []string{"allow", "low_allowed", "low_not_allowed", "risk", "changed_quote", "journal_error"} {
+	for _, name := range []string{"allow", "low_allowed", "low_not_allowed", "risk", "changed_quote", "journal_error", "locked", "lock_during_risk"} {
 		t.Run(name, func(t *testing.T) {
 			q := testQuote("10000")
 			signingRequests := 0
@@ -100,9 +101,20 @@ func TestPayFinalGateAndReceipt(t *testing.T) {
 			}))
 			defer server.Close()
 			key, _ := crypto.GenerateKey()
-			path := filepath.Join(t.TempDir(), "key")
-			os.WriteFile(path, []byte(hex.EncodeToString(crypto.FromECDSA(key))), 0600)
+			grant, err := newGrant(key, nil, "test", time.Now().Add(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer grant.lock()
+			signer := &walletSigner{grant: grant, address: crypto.PubkeyToAddress(key.PublicKey).Hex()}
+			wipeKey(key)
 			scanner := &scannerStub{action: "allow"}
+			if name == "locked" {
+				grant.lock()
+			}
+			if name == "lock_during_risk" {
+				scanner.onScreen = grant.lock
+			}
 			if name == "risk" {
 				scanner.action = "deny"
 			}
@@ -115,7 +127,7 @@ func TestPayFinalGateAndReceipt(t *testing.T) {
 			}
 			reserved := 0
 			c := Candidate{Service: Service{ID: "C", URL: server.URL, PayTo: testPayTo, Amount: "10000"}, Quote: q, Level: 0}
-			out := Pay(context.Background(), c, Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: maxRisk, Preference: "price"}, path, scanner, func() error {
+			out := Pay(context.Background(), c, Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: maxRisk, Preference: "price"}, signer, scanner, func() error {
 				reserved++
 				if name == "journal_error" {
 					return errors.New("disk failure")
@@ -127,6 +139,9 @@ func TestPayFinalGateAndReceipt(t *testing.T) {
 					t.Fatalf("expected one test signature and mock receipt: %+v requests=%d reserve=%d", out, signingRequests, reserved)
 				}
 			} else {
+				if (name == "locked" || name == "lock_during_risk") && reserved != 0 {
+					t.Fatal("locked wallet reserved payment")
+				}
 				if out.Signed || out.Settled || signingRequests != 0 || out.Error == "" {
 					t.Fatalf("gate bypass %+v", out)
 				}
@@ -136,7 +151,7 @@ func TestPayFinalGateAndReceipt(t *testing.T) {
 }
 func TestJournalAndRequestIsolation(t *testing.T) {
 	dir := t.TempDir()
-	a, err := NewApp("127.0.0.1:8080", dir, "unused", NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", dir, NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +160,7 @@ func TestJournalAndRequestIsolation(t *testing.T) {
 	if a.persist(task) != nil {
 		t.Fatal("persist failed")
 	}
-	recovered, err := NewApp(a.host, dir, "unused", a.model, a.scanner, testPayTo, testRisk)
+	recovered, err := NewApp(a.host, dir, a.model, a.scanner, testPayTo, testRisk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +196,7 @@ func TestAgentLoopSimulationAndDuplicateExecute(t *testing.T) {
 	}))
 	defer modelServer.Close()
 	scanner := &scannerStub{action: "allow"}
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), "nonexistent", NewModel("test", "test", modelServer.URL), scanner, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", modelServer.URL), scanner, testPayTo, testRisk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +231,7 @@ func TestModelErrorDoesNotExposeCredential(t *testing.T) {
 }
 
 func TestDuplicateTaskAndChangedAuthorization(t *testing.T) {
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), "unused", NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,14 +261,14 @@ func TestDuplicateTaskAndChangedAuthorization(t *testing.T) {
 
 func TestOptionalLowRiskRecipientIsDistinct(t *testing.T) {
 	low := "0x3333333333333333333333333333333333333333"
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), "unused", NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, low)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, low)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.services[2].PayTo != low || a.services[3].PayTo != testPayTo {
 		t.Fatalf("C/D recipients not separated: %+v", a.services)
 	}
-	if _, err := NewApp("127.0.0.1:8080", t.TempDir(), "unused", NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, testRisk); err == nil {
+	if _, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, testRisk); err == nil {
 		t.Fatal("reused risk fixture must fail")
 	}
 }
@@ -274,7 +289,7 @@ func TestLivePreviewRanksScreenedRecipients(t *testing.T) {
 		low:       {Action: "allow", Level: 1, Address: low, ToxicScore: &zero, Traits: []probe.Trait{{Risk: &ten, Name: "reviewed_advisory", Description: "minor exposure"}}},
 		testPayTo: {Action: "allow", Level: 0, Address: testPayTo, ToxicScore: &zero},
 	}}
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), "unused", NewModel("test", "test", "https://api.deepseek.com"), scanner, testPayTo, testRisk, low)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), scanner, testPayTo, testRisk, low)
 	if err != nil {
 		t.Fatal(err)
 	}

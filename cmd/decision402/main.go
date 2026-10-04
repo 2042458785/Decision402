@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// The UI encrypts personal API keys. The optional shared key comes only
+	// from the process environment, not the plaintext .env file.
+	cfg.DeepSeekKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
 	if cfg.DeepSeekModel == "" {
 		cfg.DeepSeekModel = "deepseek-flash"
 	}
@@ -46,7 +50,7 @@ func main() {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		log.Fatal("another Decision402 instance owns the task journal")
 	}
-	app, err := agent.NewApp(*listen, dir, ".buyer-key", agent.NewModel(cfg.DeepSeekKey, cfg.DeepSeekModel, cfg.DeepSeekURL), probe.NewClient(cfg.APIKey, 15*time.Second, cfg.LowRiskTraits...), cfg.NormalAddress, cfg.RiskAddress, cfg.LowRiskAddress)
+	app, err := agent.NewApp(*listen, dir, agent.NewModel(cfg.DeepSeekKey, cfg.DeepSeekModel, cfg.DeepSeekURL), probe.NewClient(cfg.APIKey, 15*time.Second, cfg.LowRiskTraits...), cfg.NormalAddress, cfg.RiskAddress, cfg.LowRiskAddress)
 	if err != nil {
 		log.Fatal(err)
 	}

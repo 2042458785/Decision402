@@ -29,6 +29,7 @@ type Message struct {
 type Model struct {
 	Key, Name, BaseURL string
 	HTTP               *http.Client
+	keyProvider        func() ([]byte, error)
 }
 
 func NewModel(key, name, base string) *Model {
@@ -50,7 +51,20 @@ func (m *Model) Complete(ctx context.Context, messages []Message) (Message, erro
 		return Message{}, errors.New("Could not construct the model request")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.Key)
+	key := m.Key
+	if m.keyProvider != nil {
+		secret, err := m.keyProvider()
+		if err != nil {
+			return Message{}, err
+		}
+		defer wipe(secret)
+		key = string(secret)
+		if key == "" {
+			return Message{}, errors.New("Model key is unavailable")
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	defer func() { req.Header.Del("Authorization"); key = "" }()
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
 		return Message{}, errors.New("Model request failed or timed out; no automatic retry")
@@ -63,6 +77,10 @@ func (m *Model) Complete(ctx context.Context, messages []Message) (Message, erro
 	if err != nil {
 		return Message{}, errors.New("Could not read the model response")
 	}
+	defer wipe(b)
+	if key != "" && bytes.Contains(b, []byte(key)) {
+		return Message{}, errors.New("Model response contained credentials and was discarded")
+	}
 	var result struct {
 		Choices []struct {
 			Message Message `json:"message"`
@@ -70,6 +88,11 @@ func (m *Model) Complete(ctx context.Context, messages []Message) (Message, erro
 	}
 	if json.Unmarshal(b, &result) != nil || len(result.Choices) != 1 {
 		return Message{}, errors.New("Model response format is invalid")
+	}
+	decoded, _ := json.Marshal(result.Choices[0].Message)
+	defer wipe(decoded)
+	if key != "" && bytes.Contains(decoded, []byte(key)) {
+		return Message{}, errors.New("Model response contained credentials and was discarded")
 	}
 	return result.Choices[0].Message, nil
 }
