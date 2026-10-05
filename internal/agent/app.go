@@ -53,6 +53,11 @@ type App struct {
 	services         []Service
 	dir, host        string
 	agentDir         string
+	withdrawDir      string
+	withdrawRPC      string
+	withdrawDial     func(context.Context) (withdrawalChain, error)
+	withdrawMu       sync.Mutex
+	withdrawals      map[string]withdrawal
 	agents           map[string]agentRecord
 	auth             *ownerAuth
 	walletOps        sync.Mutex
@@ -85,8 +90,16 @@ func NewApp(host, dir string, model *Model, scanner interface {
 	if filepath.Base(dir) == "tasks" {
 		agentDir = filepath.Join(filepath.Dir(dir), "agents")
 	}
-	a := &App{tasks: map[string]*Task{}, model: model, scanner: scanner, dir: dir, host: host, agentDir: agentDir, auth: newOwnerAuth(), grants: map[string]*walletGrant{}, lockEpoch: map[string]uint64{}, scryptN: keystore.StandardScryptN, scryptP: keystore.StandardScryptP}
+	withdrawDir := filepath.Join(filepath.Dir(agentDir), "withdrawals")
+	rpcURL := strings.TrimSpace(os.Getenv("BASE_SEPOLIA_RPC_URL"))
+	if rpcURL == "" {
+		rpcURL = defaultWithdrawRPC
+	}
+	a := &App{tasks: map[string]*Task{}, model: model, scanner: scanner, dir: dir, host: host, agentDir: agentDir, withdrawDir: withdrawDir, withdrawRPC: rpcURL, auth: newOwnerAuth(), grants: map[string]*walletGrant{}, lockEpoch: map[string]uint64{}, scryptN: keystore.StandardScryptN, scryptP: keystore.StandardScryptP}
 	if err := a.loadAgents(); err != nil {
+		return nil, err
+	}
+	if err := a.loadWithdrawals(); err != nil {
 		return nil, err
 	}
 	for _, s := range []Service{{ID: "A", Name: "A · first provider", PayTo: risky, Amount: "5000"}, {ID: "B", Name: "B · alternate provider", PayTo: risky, Amount: "20000"}, {ID: "C", Name: "C · budget provider", PayTo: lowRecipient, Amount: "10000"}, {ID: "D", Name: "D · premium provider", PayTo: normal, Amount: "50000"}} {
@@ -217,6 +230,8 @@ func (a *App) Handler(webDir string) http.Handler {
 	mux.HandleFunc("POST /api/agents", a.createAgent)
 	mux.HandleFunc("POST /api/agents/restore", a.restoreAgent)
 	mux.HandleFunc("POST /api/agents/{id}/{action}", a.walletAction)
+	mux.HandleFunc("POST /api/agents/{id}/withdraw", a.withdraw)
+	mux.HandleFunc("GET /api/agents/{id}/withdrawals", a.listWithdrawals)
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]any{"model": a.model.Name, "network": Network, "asset": Asset, "services": a.services, "max_demo_usdc": "0.10"})
 	})

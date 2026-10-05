@@ -1,4 +1,4 @@
-# Wallet changes: phase 1
+# Wallet changes: current version
 
 [中文](Wallet.md) · 2026-10-05
 
@@ -30,4 +30,32 @@ Current limit: Encrypted files still live on the computer running the app, and t
 | Download and restore the keystore | Import the backup into an installation with empty project data and enter the original password. The wallet address is unchanged; re-enter the name and personal DeepSeek key. One installation cannot register the same wallet to two Agents at once. |
 | Preview and test a purchase | Go policy and risk checks still choose the provider. Preview sends no payment; pay mode signs x402 with the Agent wallet. |
 
-Only ordinary Agent wallets are supported now. There is no smart wallet, onchain daily limit, or UI action to return funds to MetaMask. Spending from separate tasks is not added into a daily total. Phase 1 does not establish that the app is ready to hold real funds for unfamiliar users. The separate `cmd/x402-demo` remains an older CLI demo and does not use Agent wallets created in the UI.
+## Added in this version: return test USDC to MetaMask
+
+| Before | Now | Keep in mind |
+|---|---|---|
+| The page could fund and spend from an Agent wallet, but could not return its balance. | Sign in with MetaMask, unlock the Agent, enter an amount, and enter the wallet password again. Test USDC can go only to the signed-in MetaMask address. The page shows status and a transaction link. | The Agent wallet needs Base Sepolia test ETH for gas. The page can send it 0.001 test ETH from MetaMask. |
+
+Before broadcast, the app saves the request ID and signed transaction under `artifacts/withdrawals/`. After a connection failure, check its status. “Resend same transaction” does not sign a new transfer. Another withdrawal is blocked while one is pending. **The backend still decrypts the ordinary wallet key to sign a withdrawal; this does not give the user independent wallet control.**
+
+Try it yourself: send a little test USDC and test ETH to the Agent, unlock it, and withdraw a small amount. Check the recipient, amount, and success status on the page and BaseScan. A wrong password should be rejected; resending the same transaction should keep the same hash.
+
+## Phase 2: user control (deferred from this version)
+
+Study and build a MetaMask-owned smart wallet, limited Agent authorization, revocation, and a design in which the backend does not hold the full wallet key.
+
+## Phase 3: wallet rules and records (deferred from this version)
+
+Design enforceable cumulative spending limits and recipient allowlists with the smart-wallet approach. Transfers are visible onchain; task details, offers, and risk checks still need application records.
+
+---
+
+## Next wallet version
+
+| Work | Success check |
+|---|---|
+| Test smart-wallet x402 compatibility | On Base Sepolia, complete one real offer, signature, and settlement using a smart wallet. |
+| Give the user control | MetaMask can revoke Agent authorization and withdraw independently; the backend can spend only within the user's grant. |
+| Decide how to enforce limits | Measure whether a strict onchain daily total adds an onchain transaction to each small purchase before choosing the design. |
+
+This version still uses ordinary Agent wallets and has no cross-task daily limit. It is not ready to hold real funds for unfamiliar users. The separate `cmd/x402-demo` does not use Agent wallets created in the UI.
