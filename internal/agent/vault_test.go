@@ -60,7 +60,7 @@ func (f *walletTestApp) call(t *testing.T, path string, body any, cookie *http.C
 	return w
 }
 func testAgentInput() agentInput {
-	return agentInput{Name: "Test buyer", ModelURL: "https://api.deepseek.com", ModelName: "deepseek-flash", ModelAPIKey: testModelSecret, Password: testWalletPassword}
+	return agentInput{WalletKind: "legacy", Name: "Test buyer", ModelURL: "https://api.deepseek.com", ModelName: "deepseek-flash", ModelAPIKey: testModelSecret, Password: testWalletPassword}
 }
 func (f *walletTestApp) create(t *testing.T) agentView {
 	t.Helper()

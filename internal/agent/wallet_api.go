@@ -14,6 +14,7 @@ import (
 )
 
 type agentInput struct {
+	WalletKind  string          `json:"wallet_kind,omitempty"`
 	Name        string          `json:"name"`
 	ModelURL    string          `json:"model_url"`
 	ModelName   string          `json:"model_name"`
@@ -128,6 +129,17 @@ func (a *App) createOrRestoreAgent(w http.ResponseWriter, r *http.Request, resto
 		return
 	}
 	defer func() { input.Password = ""; input.ModelAPIKey = "" }()
+	if input.WalletKind == "" && !restore {
+		input.WalletKind = "smart"
+	}
+	if input.WalletKind != "" && input.WalletKind != "legacy" && input.WalletKind != "smart" {
+		jsonResponse(w, 400, map[string]string{"error": "Unknown wallet kind"})
+		return
+	}
+	if input.WalletKind == "smart" && a.smartChain == nil {
+		jsonResponse(w, 503, map[string]string{"error": "Smart wallet RPC is not configured"})
+		return
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if len(input.Name) < 1 || len(input.Name) > 40 || input.ModelURL != "https://api.deepseek.com" || (input.ModelName != "deepseek-flash" && input.ModelName != "deepseek-v4-pro") || len(input.ModelAPIKey) > 256 || strings.ContainsAny(input.ModelAPIKey, "\r\n") {
 		jsonResponse(w, 400, map[string]string{"error": "Use a name, the official DeepSeek endpoint, and a supported model"})
@@ -172,10 +184,14 @@ func (a *App) createOrRestoreAgent(w http.ResponseWriter, r *http.Request, resto
 	}
 	defer wipeKey(pk)
 	address := crypto.PubkeyToAddress(pk.PublicKey).Hex()
+	if input.WalletKind == "smart" && strings.EqualFold(address, owner) {
+		jsonResponse(w, 400, map[string]string{"error": "The owner key cannot be used as a session key"})
+		return
+	}
 	a.mu.Lock()
 	duplicate := false
 	for _, record := range a.agents {
-		if strings.EqualFold(record.Wallet, address) {
+		if strings.EqualFold(record.signingAddress(), address) {
 			duplicate = true
 		}
 	}
@@ -190,6 +206,11 @@ func (a *App) createOrRestoreAgent(w http.ResponseWriter, r *http.Request, resto
 		return
 	}
 	record := agentRecord{ID: id, Owner: owner, Name: input.Name, Wallet: address, ModelURL: input.ModelURL, ModelName: input.ModelName}
+	if input.WalletKind == "smart" {
+		record.WalletKind = "smart"
+		record.SessionAddress = address
+		record.Wallet = ""
+	}
 	secret := []byte(input.ModelAPIKey)
 	defer wipe(secret)
 	record, err = encryptRecord(record, pk, secret, input.Password, a.scryptN, a.scryptP)

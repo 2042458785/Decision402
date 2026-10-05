@@ -89,7 +89,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe session cookie")
 	}
-	createBody := `{"name":"Tokyo buyer","model_url":"https://api.deepseek.com","model_name":"deepseek-flash","model_api_key":"agent-model-secret","password":"test-wallet-password"}`
+	createBody := `{"wallet_kind":"legacy","name":"Tokyo buyer","model_url":"https://api.deepseek.com","model_name":"deepseek-flash","model_api_key":"agent-model-secret","password":"test-wallet-password"}`
 	if got := call("POST", "/api/agents", createBody, nil); got.Code != 401 {
 		t.Fatal("agent creation without owner session")
 	}

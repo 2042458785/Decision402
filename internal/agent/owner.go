@@ -20,17 +20,21 @@ import (
 
 // Only encrypted secrets are persisted or held in the Agent registry.
 type agentRecord struct {
-	ID          string               `json:"id"`
-	Owner       string               `json:"owner"`
-	Name        string               `json:"name"`
-	Wallet      string               `json:"wallet"`
-	ModelURL    string               `json:"model_url"`
-	ModelName   string               `json:"model_name"`
-	Version     int                  `json:"vault_version,omitempty"`
-	KeyStore    json.RawMessage      `json:"keystore,omitempty"`
-	ModelSecret *keystore.CryptoJSON `json:"model_secret,omitempty"`
+	WalletKind     string               `json:"wallet_kind,omitempty"`
+	SessionAddress string               `json:"session_address,omitempty"`
+	ID             string               `json:"id"`
+	Owner          string               `json:"owner"`
+	Name           string               `json:"name"`
+	Wallet         string               `json:"wallet"`
+	ModelURL       string               `json:"model_url"`
+	ModelName      string               `json:"model_name"`
+	Version        int                  `json:"vault_version,omitempty"`
+	KeyStore       json.RawMessage      `json:"keystore,omitempty"`
+	ModelSecret    *keystore.CryptoJSON `json:"model_secret,omitempty"`
 }
 type agentView struct {
+	WalletKind     string `json:"wallet_kind"`
+	SessionAddress string `json:"session_address,omitempty"`
 	ID             string `json:"id"`
 	Owner          string `json:"owner"`
 	Name           string `json:"name"`
@@ -44,7 +48,7 @@ type agentView struct {
 }
 
 func (a agentRecord) view() agentView {
-	return agentView{ID: a.ID, Owner: a.Owner, Name: a.Name, Wallet: a.Wallet, ModelURL: a.ModelURL, ModelName: a.ModelName, Locked: true, NeedsMigration: a.Version != 1, HasModelKey: a.ModelSecret != nil}
+	return agentView{WalletKind: a.WalletKind, SessionAddress: a.SessionAddress, ID: a.ID, Owner: a.Owner, Name: a.Name, Wallet: a.Wallet, ModelURL: a.ModelURL, ModelName: a.ModelName, Locked: true, NeedsMigration: a.Version != 1, HasModelKey: a.ModelSecret != nil}
 }
 
 type challenge struct {
@@ -97,7 +101,7 @@ func (a *App) loadAgents() error {
 			return err
 		}
 		var agent agentRecord
-		if json.Unmarshal(b, &agent) != nil || !taskIDPattern.MatchString(agent.ID) || filepath.Base(path) != agent.ID+".json" || !addressPattern.MatchString(agent.Owner) || !addressPattern.MatchString(agent.Wallet) || agent.ModelURL != "https://api.deepseek.com" {
+		if json.Unmarshal(b, &agent) != nil || !taskIDPattern.MatchString(agent.ID) || filepath.Base(path) != agent.ID+".json" || !addressPattern.MatchString(agent.Owner) || !validWalletRecord(agent) || agent.ModelURL != "https://api.deepseek.com" {
 			return errors.New("Agent vault metadata is invalid")
 		}
 		wipe(b)

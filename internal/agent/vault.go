@@ -128,7 +128,7 @@ func decryptRecord(record agentRecord, password string) (*keystore.Key, []byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if !strings.EqualFold(key.Address.Hex(), record.Wallet) {
+	if !strings.EqualFold(key.Address.Hex(), record.signingAddress()) {
 		wipeKey(key.PrivateKey)
 		return nil, nil, errWalletPassword
 	}
@@ -243,6 +243,9 @@ func (g *walletGrant) modelKey() ([]byte, error) {
 }
 
 type walletSigner struct {
+	failureMu  sync.Mutex
+	failure    string
+	smart      *smartPayment
 	grant      *walletGrant
 	address    string
 	beforeSign func() error
@@ -251,6 +254,15 @@ type walletSigner struct {
 
 func (s *walletSigner) Address() string { return s.address }
 func (s *walletSigner) SignTypedData(ctx context.Context, domain evm.TypedDataDomain, types map[string][]evm.TypedDataField, primary string, message map[string]interface{}) ([]byte, error) {
+	if s.smart != nil {
+		signature, err := s.signSmart(ctx, domain, types, primary, message)
+		if err != nil {
+			s.failureMu.Lock()
+			s.failure = err.Error()
+			s.failureMu.Unlock()
+		}
+		return signature, err
+	}
 	g := s.grant
 	if g == nil {
 		return nil, errWalletLocked
