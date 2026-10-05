@@ -4,7 +4,8 @@ import Dropdown from './Dropdown.vue'
 import Scramble from './Scramble.vue'
 type Policy={per_payment:string;task_budget:string;max_risk:number;preference:string}
 type Request={id:string;agent_id:string;instruction:string;mode:string;policy:Policy}
-type Agent={id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string}
+type Agent={id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string;locked:boolean;unlock_until?:string;has_model_key:boolean}
+type Withdrawal={id:string;agent_id:string;to:string;amount:string;transaction:string;status:'pending'|'confirmed'|'failed';created:string}
 type EthereumProvider={request:(args:{method:string;params?:unknown[]})=>Promise<any>;on?:(event:string,handler:(accounts:string[])=>void)=>void;removeListener?:(event:string,handler:(accounts:string[])=>void)=>void}
 declare global { interface Window { ethereum?: EthereumProvider } }
 type Candidate={service:{id:string;name:string;pay_to:string;amount:string};level:number;eligible:boolean;reason:string;source:string;quote?:{amount:string};risk?:{toxicScore?:number;traits?:{name:string;description:string}[];duration_ms:number}}
@@ -14,7 +15,13 @@ const mode=ref('simulate')
 const policy=ref<Policy>({per_payment:'0.10',task_budget:'0.10',max_risk:1,preference:'price'})
 const task=ref<Task|null>(null), config=ref<{model:string;asset:string}|null>(null), error=ref(''), sending=ref(false)
 const owner=ref(''), agents=ref<Agent[]>([]), agentID=ref(''), agentName=ref('Tokyo buyer'), modelURL=ref('https://api.deepseek.com'), modelName=ref('deepseek-flash'), modelAPIKey=ref('')
-const agentBusy=ref(false), funding=ref(false), walletError=ref(''), balance=ref(''), fundAmount=ref('10'), fundTx=ref('')
+const walletPassword=ref(''), passwordConfirm=ref(''), actionPassword=ref(''), backupFile=ref<File|null>(null), walletNotice=ref(''), clockNow=ref(Date.now())
+let walletClock:ReturnType<typeof setInterval>|undefined
+const walletLocked=computed(()=>!selectedAgent.value || selectedAgent.value.locked || !selectedAgent.value.unlock_until || Date.parse(selectedAgent.value.unlock_until)<=clockNow.value)
+const agentBusy=ref(false), funding=ref(false), walletError=ref(''), balance=ref(''), gasBalance=ref(''), fundAmount=ref('10'), fundTx=ref(''), gasTx=ref('')
+const withdrawAmount=ref(''), withdrawPassword=ref(''), withdrawing=ref(false), withdrawals=ref<Withdrawal[]>([])
+const latestWithdrawal=computed(()=>withdrawals.value[0])
+let withdrawalTimer:ReturnType<typeof setInterval>|undefined
 const selectedAgent=computed(()=>agents.value.find(a=>a.id===agentID.value))
 const pending=ref<Request|null>(null)
 const initializing=ref(true)
@@ -176,9 +183,9 @@ async function fetchAgents(){
  agents.value=await r.json()
  if(!agentID.value)agentID.value=localStorage.getItem('decision402-agent')??''
  if(!agents.value.some(a=>a.id===agentID.value))agentID.value=agents.value[0]?.id??''
- if(agentID.value)await refreshBalance()
+ if(agentID.value){await refreshBalance();await refreshWithdrawals()}
 }
-function chooseAgent(){localStorage.setItem('decision402-agent',agentID.value);balance.value='';fundTx.value='';void refreshBalance()}
+function chooseAgent(){actionPassword.value='';withdrawPassword.value='';walletNotice.value='';localStorage.setItem('decision402-agent',agentID.value);balance.value='';gasBalance.value='';fundTx.value='';gasTx.value='';withdrawals.value=[];void refreshBalance();void refreshWithdrawals()}
 async function connectWallet(){
  walletError.value='';agentBusy.value=true
  try{
@@ -197,16 +204,49 @@ async function connectWallet(){
  }catch(e){walletError.value=e instanceof Error?e.message:'Could not connect wallet'}finally{agentBusy.value=false}
 }
 async function createAgent(){
- walletError.value='';agentBusy.value=true
+ walletError.value='';walletNotice.value='';agentBusy.value=true
  try{
   if(!owner.value)throw new Error('Connect your owner wallet first')
-  const response=await fetch('/api/agents',{method:'POST',headers:apiHeaders,body:JSON.stringify({name:agentName.value,model_url:modelURL.value,model_name:modelName.value,model_api_key:modelAPIKey.value.trim()})})
+  if(walletPassword.value.length<12)throw new Error('Use at least 12 characters for the wallet password')
+  if(walletPassword.value!==passwordConfirm.value)throw new Error('The two wallet passwords do not match')
+  if(backupFile.value && backupFile.value.size>16384)throw new Error('Wallet backup is too large')
+  let keystore:unknown
+  if(backupFile.value){try{keystore=JSON.parse(await backupFile.value.text())}catch{throw new Error('Choose a valid encrypted keystore file')}}
+  const response=await fetch(backupFile.value?'/api/agents/restore':'/api/agents',{method:'POST',headers:apiHeaders,body:JSON.stringify({name:agentName.value,model_url:modelURL.value,model_name:modelName.value,model_api_key:modelAPIKey.value.trim(),password:walletPassword.value,...(keystore?{keystore}:{})})})
   const result=await response.json()
   if(!response.ok)throw new Error(result.error??'Could not create agent')
   modelAPIKey.value=''
-  agents.value.push(result as Agent);agentID.value=result.id;localStorage.setItem('decision402-agent',result.id);balance.value='0';fundTx.value=''
- }catch(e){walletError.value=e instanceof Error?e.message:'Could not create agent'}finally{agentBusy.value=false}
+  agents.value.push(result as Agent);agentID.value=result.id;localStorage.setItem('decision402-agent',result.id);balance.value='0';gasBalance.value='0';withdrawals.value=[];fundTx.value=''
+   walletNotice.value='Wallet saved and locked. Keep the password and download a backup.'
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not create agent'}finally{agentBusy.value=false;walletPassword.value='';passwordConfirm.value='';modelAPIKey.value=''}
 }
+function selectBackup(event:Event){backupFile.value=(event.target as HTMLInputElement).files?.[0]??null}
+async function walletAction(action:'unlock'|'lock'|'backup'){
+ const agent=selectedAgent.value;if(!agent)return
+ walletError.value='';walletNotice.value='';agentBusy.value=true
+ try{
+  const response=await fetch('/api/agents/'+agent.id+'/'+action,{method:'POST',headers:apiHeaders,body:JSON.stringify(action==='lock'?{}:{password:actionPassword.value})})
+  if(!response.ok){const result=await response.json();throw new Error(result.error??'Wallet action failed')}
+  if(action==='backup'){
+   const blob=await response.blob(), url=URL.createObjectURL(blob), link=document.createElement('a')
+   link.href=url;link.download='decision402-'+agent.id+'.keystore.json';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)
+   walletNotice.value='Backup download started. Check your downloads and keep the password separately. The model API key is not included.'
+  }else{
+   const result=await response.json() as Agent
+   agents.value=agents.value.map(a=>a.id===result.id?result:a)
+   walletNotice.value=action==='lock'?'Wallet locked. New signatures are blocked.':'Unlocked for up to 10 minutes.'
+  }
+ }catch(e){walletError.value=e instanceof Error?e.message:'Wallet action failed'}finally{actionPassword.value='';agentBusy.value=false}
+}
+async function disconnectWallet(){
+ walletError.value=''
+ try{
+  const response=await fetch('/api/auth/logout',{method:'POST',headers:apiHeaders,body:'{}'})
+  if(!response.ok && response.status!==401)throw new Error('Could not lock wallets; try again')
+  clearWalletUI()
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not disconnect'}
+}
+function clearWalletUI(){owner.value='';agents.value=[];agentID.value='';balance.value='';gasBalance.value='';withdrawals.value=[];withdrawPassword.value='';task.value=null;actionPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value=''}
 async function refreshBalance(){
  const agent=selectedAgent.value
  if(!agent || !config.value)return
@@ -216,6 +256,8 @@ async function refreshBalance(){
   const value=await provider().request({method:'eth_call',params:[{to:config.value.asset,data},'latest']}) as string
   const atomic=BigInt(value)
   balance.value=(atomic/1000000n).toString()+'.'+(atomic%1000000n).toString().padStart(6,'0')
+  const wei=BigInt(await provider().request({method:'eth_getBalance',params:[agent.wallet,'latest']}) as string)
+  gasBalance.value=(wei/1000000000000000000n).toString()+'.'+(wei%1000000000000000000n).toString().padStart(18,'0').slice(0,6)
  }catch(e){walletError.value=e instanceof Error?e.message:'Could not read test USDC balance'}
 }
 function usdcUnits(value:string):bigint{
@@ -245,8 +287,66 @@ async function fundAgent(){
   throw new Error('Funding is pending. Check the transaction link, then refresh the balance.')
  }catch(e){walletError.value=e instanceof Error?e.message:'Funding failed'}finally{funding.value=false}
 }
+async function fundWithdrawalGas(){
+ walletError.value='';funding.value=true
+ try{
+  const agent=selectedAgent.value
+  if(!agent || !owner.value)throw new Error('Connect and create an agent first')
+  await ensureBaseSepolia()
+  const accounts=await provider().request({method:'eth_accounts'}) as string[]
+  if(!accounts?.some(a=>a.toLowerCase()===owner.value.toLowerCase()))throw new Error('MetaMask account changed; connect again')
+  gasTx.value=await provider().request({method:'eth_sendTransaction',params:[{from:owner.value,to:agent.wallet,value:'0x38d7ea4c68000'}]}) as string
+  for(let i=0;i<60;i++){
+   const receipt=await provider().request({method:'eth_getTransactionReceipt',params:[gasTx.value]}) as {status:string}|null
+   if(receipt){if(receipt.status!=='0x1')throw new Error('The gas transfer failed onchain');await refreshBalance();return}
+   await new Promise(resolve=>setTimeout(resolve,1500))
+  }
+  throw new Error('Gas transfer is pending. Check its transaction link, then refresh the balance.')
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not fund gas'}finally{funding.value=false}
+}
+async function refreshWithdrawals(){
+ const agent=selectedAgent.value
+ if(!agent)return
+ try{
+  const response=await fetch('/api/agents/'+agent.id+'/withdrawals')
+  if(!response.ok)throw new Error('Could not check withdrawals')
+  if(selectedAgent.value?.id===agent.id){withdrawals.value=await response.json();if(latestWithdrawal.value?.status==='confirmed')await refreshBalance()}
+ }catch(e){walletError.value=e instanceof Error?e.message:'Could not check withdrawals'}
+}
+async function withdrawAgent(retry=false){
+ const agent=selectedAgent.value
+ if(!agent || !owner.value)return
+ walletError.value='';walletNotice.value='';withdrawing.value=true
+ try{
+  await ensureBaseSepolia()
+  const accounts=await provider().request({method:'eth_accounts'}) as string[]
+  if(!accounts?.some(a=>a.toLowerCase()===owner.value.toLowerCase()))throw new Error('MetaMask account changed; connect again')
+  if(!retry && walletLocked.value)throw new Error('Unlock the Agent wallet first')
+  if(!retry && !withdrawPassword.value)throw new Error('Enter the wallet password to confirm')
+  const amount=retry?latestWithdrawal.value?.amount:withdrawAmount.value
+  const id=retry?latestWithdrawal.value?.id:crypto.randomUUID()
+  if(!amount || !id)throw new Error('No pending withdrawal')
+  if(!retry){
+   const atomic=usdcUnitsForWithdrawal(amount)
+   if(atomic>usdcUnitsForWithdrawal(balance.value))throw new Error('Amount exceeds the Agent wallet balance')
+   if(!window.confirm('Return '+amount+' test USDC to '+owner.value+'? This sends a blockchain transaction.'))return
+  }
+  const response=await fetch('/api/agents/'+agent.id+'/withdraw',{method:'POST',headers:apiHeaders,body:JSON.stringify({id,amount,password:retry?'':withdrawPassword.value})})
+  const result=await response.json()
+  if(!response.ok)throw new Error(result.error??'Withdrawal failed')
+  walletNotice.value='Withdrawal sent or pending. Check the transaction link below; do not start another while it is pending.'
+  await refreshWithdrawals()
+ }catch(e){walletError.value=e instanceof Error?e.message:'Withdrawal failed';await refreshWithdrawals()}finally{withdrawPassword.value='';withdrawing.value=false}
+}
+function usdcUnitsForWithdrawal(value:string):bigint{
+ if(!/^(0|[1-9]\d{0,9})(\.\d{1,6})?$/.test(value))throw new Error('Enter a positive test USDC amount with up to six decimals')
+ const [whole,fraction='']=value.split('.')
+ const amount=BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'))
+ if(amount<=0n)throw new Error('Enter an amount above zero')
+ return amount
+}
 function walletChanged(accounts:string[]){
- if(owner.value && !accounts.some(a=>a.toLowerCase()===owner.value.toLowerCase())){owner.value='';agents.value=[];agentID.value='';balance.value='';task.value=null;walletError.value='Wallet account changed. Connect again.'}
+ if(owner.value && !accounts.some(a=>a.toLowerCase()===owner.value.toLowerCase())){void disconnectWallet();walletError.value='Wallet account changed. Connect again.'}
 }
 function newTask(){
  if(!canStartFresh.value)return
@@ -283,6 +383,8 @@ async function start(){
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed. Retry will use the same task ID.'}finally{sending.value=false}
 }
 onMounted(async()=>{
+ walletClock=setInterval(()=>{clockNow.value=Date.now()},1000)
+ withdrawalTimer=setInterval(()=>{if(owner.value && latestWithdrawal.value?.status==='pending')void refreshWithdrawals()},5000)
  window.ethereum?.on?.('accountsChanged',walletChanged)
  try{const r=await fetch('/api/config');if(!r.ok)throw new Error('Backend is not running');config.value=await r.json()
   const session=await fetch('/api/auth/me')
@@ -294,7 +396,7 @@ onMounted(async()=>{
 // The roller reads the scroll position directly; passive, because it never
 // prevents the scroll it is following.
 onMounted(()=>{window.addEventListener('scroll',onScroll,{passive:true});window.addEventListener('resize',onScroll);onScroll()})
-onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('accountsChanged',walletChanged);window.removeEventListener('scroll',onScroll);window.removeEventListener('resize',onScroll)})
+onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(withdrawalTimer);actionPassword.value='';withdrawPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value='';window.ethereum?.removeListener?.('accountsChanged',walletChanged);window.removeEventListener('scroll',onScroll);window.removeEventListener('resize',onScroll)})
 </script>
 
 <template>
@@ -319,25 +421,44 @@ onUnmounted(()=>{clearInterval(timer);window.ethereum?.removeListener?.('account
   <section class="onboarding" aria-label="Set up your agent wallet">
    <div class="onboard-title"><span class="eyebrow">YOUR AGENT WORKSPACE</span><h2>Give an agent its own wallet.</h2><p>Connect an owner wallet, create an agent, and fund its Base Sepolia test USDC wallet. Your agent pays only after the policy and risk checks pass.</p></div>
    <div class="onboard-grid">
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':'Create agent + wallet'}} ↗</button></div></div>
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div><div class="onboard-shape circle" :class="{away:rolling}" aria-hidden="true"></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code><button v-if="owner" class="ghost-button" @click="disconnectWallet">Lock wallets and disconnect</button></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label><label>Wallet password<input v-model="walletPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" placeholder="At least 12 characters" /></label><label>Repeat password<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label><label>Restore an encrypted wallet <small>optional; use the backup's password</small><input type="file" accept=".json,application/json" @change="selectBackup" /></label><small>Keep your password. We cannot reset it. A backup restores the wallet; enter the model key again if needed.</small></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':backupFile?'Restore wallet':'Create agent + wallet'}} ↗</button></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC · gas: {{gasBalance || '—'}} test ETH</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a><p><button class="ghost-button" :disabled="!selectedAgent || funding" @click="fundWithdrawalGas">Send 0.001 test ETH for withdrawal gas</button></p><a v-if="gasTx" :href="'https://sepolia.basescan.org/tx/'+gasTx" target="_blank" rel="noopener noreferrer">View gas transaction ↗</a></div><div class="onboard-shape circle" :class="{away:rolling}" aria-hidden="true"></div></div>
    </div>
+   <div v-if="selectedAgent" class="wallet-security">
+    <h3>Wallet security · {{walletLocked?'Locked':'Unlocked'}}</h3>
+    <p>Unlock lasts up to 10 minutes. Locking stops new signatures. Payments already signed can still settle.</p>
+    <label>Wallet password<input v-model="actionPassword" type="password" autocomplete="off" maxlength="1024" /></label>
+    <div class="onboard-actions">
+      <button class="onboard-button" :disabled="agentBusy" @click="walletAction('unlock')">Unlock</button>
+      <button class="ghost-button" @click="walletAction('lock')">Lock now</button>
+      <button class="ghost-button" :disabled="agentBusy" @click="walletAction('backup')">Download encrypted backup</button>
+    </div>
+   </div>
+   <div v-if="selectedAgent" class="withdraw-box">
+    <h4>Return test USDC to MetaMask</h4>
+    <p>Only the connected owner address can receive it. The Agent wallet needs a little test ETH for gas. Unlock first, then confirm with the wallet password.</p>
+    <label>Amount · test USDC<input v-model="withdrawAmount" inputmode="decimal" placeholder="0.01" /></label>
+    <label>Wallet password<input v-model="withdrawPassword" type="password" autocomplete="off" /></label>
+    <button class="onboard-button" :disabled="walletLocked || withdrawing || latestWithdrawal?.status==='pending'" @click="withdrawAgent(false)">{{withdrawing?'Working…':'Return to MetaMask'}}</button><button class="ghost-button" :disabled="withdrawing" @click="refreshWithdrawals">Check withdrawal status</button>
+    <div v-if="latestWithdrawal" class="withdraw-status"><span>{{latestWithdrawal.amount}} test USDC · {{latestWithdrawal.status}} · to {{shortAddress(latestWithdrawal.to)}}</span><a :href="'https://sepolia.basescan.org/tx/'+latestWithdrawal.transaction" target="_blank" rel="noopener noreferrer">View transaction ↗</a><button v-if="latestWithdrawal.status==='pending'" class="ghost-button" :disabled="withdrawing" @click="withdrawAgent(true)">Resend same transaction</button></div>
+   </div>
+   <p v-if="walletNotice" role="status">{{walletNotice}}</p>
    <p v-if="walletError" class="error" role="alert">{{walletError}}</p>
-   <p class="onboard-disclaimer">Local testnet prototype. The backend keeps the agent wallet key in a private local file; back up <code>artifacts/agents/</code> before moving or deleting this workspace. Never fund it with mainnet assets.</p>
+   <p class="onboard-disclaimer">Local testnet prototype. Wallets and personal model keys are encrypted on disk. Passwords are not saved. Export your encrypted wallet backup before moving this workspace. Use test USDC only.</p>
   </section>
   <section class="ask">
    <form class="ask-field" @submit.prevent="start">
     <input v-model="instruction" maxlength="2000" :disabled="active || !!pending"
       placeholder="What should the agent buy?" aria-label="What should the agent buy" />
-    <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment">
+    <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment || (walletLocked && (mode==='pay' || selectedAgent.has_model_key))">
      <span>{{active?'Working':pending?'Retry':mode==='pay'?'Authorize payment':'Send'}}</span>
      <i :class="{spinner:active}" aria-hidden="true">{{active?'':'→'}}</i>
     </button>
    </form>
    <div class="ask-meta">
-    <span v-if="!selectedAgent" class="ask-need">Create an agent below before sending a task.</span>
-    <span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
+    <span v-if="!selectedAgent" class="ask-need">Create an agent above before sending a task.</span>
+    <span v-else-if="walletLocked && (mode==='pay' || selectedAgent.has_model_key)">Unlock the agent wallet above before sending this task.</span><span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
     <span class="ask-mode">{{mode==='simulate'?'POLICY SIMULATION':mode==='preview'?'LIVE PREVIEW · NO PAYMENT':'TESTNET EXECUTION'}}</span>
    </div>
   </section>

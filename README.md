@@ -2,13 +2,19 @@
 
 ## 新版：直接运行 Agent 页面 / New: Run the Agent UI
 
-**新流程：**连接 MetaMask（Base Sepolia）并签署登录消息 → 输入 Agent 名称、DeepSeek API URL／模型／可选个人 API key → 创建 Agent 与专属测试网钱包 → 在 MetaMask 中确认给该地址转入测试 USDC（默认 10）→ 设置单次预算与风险偏好 → 先 Preview，再执行 Pay。页面自动使用该 Agent 的钱包付款；主页面不再需要手工创建 `.buyer-key`。钱包私钥和用户输入的模型 key 保存在本机被 Git 忽略的 `artifacts/agents/`，文件权限为 0600；页面和模型上下文不接收钱包私钥。
+| 操作 / Action | 现在怎么用 / How it works |
+|---|---|
+| 创建 / Create | 连接 MetaMask，填 Agent 信息、个人 DeepSeek Key 和至少 12 位钱包口令。私钥和个人 Key 加密保存，口令不保存。 / Connect MetaMask, enter Agent settings, a personal DeepSeek key and a wallet password of at least 12 characters. Wallet and model keys are encrypted; the password is not retained. |
+| 使用 / Use | 充值测试 USDC → 解锁 → Preview 或 Pay。解锁最长 10 分钟；个人模型 Key 也需要解锁后使用。 / Fund with test USDC → unlock → Preview or Pay. Unlock lasts up to 10 minutes; a personal model key also requires unlocking. |
+| 锁定 / Lock | 点“Lock now”或退出登录；重启后也会锁定。已签出的付款仍可能结算。 / Use “Lock now” or disconnect. Restart also locks wallets. Payments already signed may still settle. |
+| 提现 / Withdraw | 解锁 Agent，输入金额和钱包口令，把测试 USDC 转回登录的 MetaMask。Agent 需要少量 Base Sepolia 测试 ETH 付 gas。 / Unlock the Agent, enter an amount and wallet password, and return test USDC to the signed-in MetaMask address. The Agent needs a little Base Sepolia test ETH for gas. |
+| 备份 / Backup | 输入口令，下载加密 keystore；恢复时选择文件并输入原口令。钱包备份不含模型 Key，需要重新填写。 / Enter the password and download the encrypted keystore. Restore using the file and original password. Re-enter the model key; it is not in the wallet backup. |
 
-**New flow:** Connect MetaMask on Base Sepolia and sign in → enter an agent name, DeepSeek API URL/model, and optional personal API key → create an agent and its testnet wallet → approve a test-USDC transfer to it in MetaMask (default 10) → set the budget and risk policy → Preview, then Pay. The main UI now pays from the agent wallet and does not require a manually created `.buyer-key`. The wallet key and any entered model key stay in Git-ignored local `artifacts/agents/` files with 0600 permissions; neither the page nor the model prompt receives the wallet key.
+可选的共用 DeepSeek Key 只从进程环境变量 `DEEPSEEK_API_KEY` 读取。主程序不再使用 `.env` 里的这个 Key；旧文件中的值请自行移除。其他 `.env` 配置仍可使用。 / The optional shared DeepSeek key comes only from the process environment variable `DEEPSEEK_API_KEY`. The main app no longer uses that key from `.env`; remove the old value yourself. Other `.env` settings still work.
 
-充值是用户钱包发起的链上 ERC-20 转账，需要用户钱包持有 Base Sepolia ETH 支付这笔充值的 gas。Agent 后续使用现有 x402 授权流程，仍由 Go 策略引擎在签名前执行 Intercepta 复查。`artifacts/agents/` 是本地保管库，删除后无法恢复其中 Agent 钱包及剩余测试币；请只充值测试币并备份该目录。当前仅支持官方 DeepSeek 地址 `https://api.deepseek.com` 与 `deepseek-flash`／`deepseek-v4-pro`。连接钱包只用于本地会话，不表示已经具备可公开部署的多用户托管安全性。
+加密文件在 `artifacts/agents/`，提现记录在 `artifacts/withdrawals/`。忘记口令无法恢复。解锁期间服务器仍有签名能力；这里仍只使用 Base Sepolia 测试币。 / Encrypted files live in `artifacts/agents/`; withdrawal records live in `artifacts/withdrawals/`. A lost password cannot be recovered. The server can sign during an unlock window. Use Base Sepolia test assets only.
 
-Funding is an onchain ERC-20 transfer from the owner wallet and requires Base Sepolia ETH for gas. Subsequent x402 payments use the existing Go policy engine and a fresh Intercepta check before signing. Back up `artifacts/agents/`: deleting it loses the agent wallet and any remaining test tokens. Use testnet assets only. This adapter currently accepts the official `https://api.deepseek.com` endpoint and `deepseek-flash` or `deepseek-v4-pro`. Wallet sign-in secures the local session; this is not a production multi-user custody service.
+改进和测试记录 / Changes and tests: [钱包改进 / Wallet changes](NextToDo/Version/V2.0/WhatWeImprove/Wallet/Wallet.md).
 
 现已接入 **DeepSeek + Go 策略引擎 + Intercepta + x402 + Vue3 页面**。一个进程提供页面和四个本地演示服务，不再需要分别启动 serve。
 
@@ -35,10 +41,12 @@ node -v        # v20.19+ 或 v22.12+ / or v22.12+
 
 Your wallet also needs Base Sepolia testnet assets: ETH to pay gas for the
 funding transfer, and test USDC to send to the agent. Both are free from public
-faucets and neither has any real value.
+faucets and neither has any real value. The Agent wallet also needs test ETH to send a withdrawal. The UI can fund this gas from MetaMask.
 
 - Base Sepolia ETH — <https://www.alchemy.com/faucets/base-sepolia>
 - Base Sepolia USDC — <https://faucet.circle.com>
+
+提现默认连接 `https://sepolia.base.org`。如需使用自己的 Base Sepolia RPC，在启动主程序前设置进程环境变量 `BASE_SEPOLIA_RPC_URL`。 / Withdrawals use `https://sepolia.base.org` by default. Set the process environment variable `BASE_SEPOLIA_RPC_URL` before starting the app if you use another Base Sepolia RPC.
 
 ```sh
 git clone https://github.com/2042458785/Decision402.git
@@ -48,8 +56,8 @@ cd Decision402
 # screening every recipient is the product, so it refuses to run blind.
 cp .env.example .env
 #   INTERCEPTA_API_KEY   sandbox key from https://intercepta.io/ethglobal
-#   DEEPSEEK_API_KEY     from https://platform.deepseek.com
-# Open .env and set both before continuing.
+# Open .env and configure Intercepta.
+# DeepSeek: enter a personal key in the UI, or set process DEEPSEEK_API_KEY.
 
 npm --prefix web ci
 npm --prefix web run build

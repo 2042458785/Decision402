@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -18,7 +17,6 @@ import (
 	nethttpmw "github.com/x402-foundation/x402/go/v2/http/nethttp"
 	buyer "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/client"
 	seller "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/server"
-	signers "github.com/x402-foundation/x402/go/v2/signers/evm"
 	"github.com/x402-foundation/x402/go/v2/types"
 )
 
@@ -84,23 +82,15 @@ type PaymentOutcome struct {
 
 // Pay performs one attempt. beforeSign durably reserves the task; it must fail
 // closed if the journal cannot be synced. No retry/recovery hooks are installed.
-func Pay(ctx context.Context, c Candidate, p Policy, keyFile string, scan interface {
+func Pay(ctx context.Context, c Candidate, p Policy, signer *walletSigner, scan interface {
 	Screen(context.Context, string) probe.Decision
 }, beforeSign func() error, emit func(string, any)) PaymentOutcome {
 	outcome := PaymentOutcome{Network: Network}
 	fail := func(msg string) PaymentOutcome { outcome.Error = msg; return outcome }
-	info, err := os.Stat(keyFile)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return fail("Test wallet file is missing or its permissions are not 600")
+	if signer == nil || signer.grant == nil || !signer.grant.valid(signer.grant.session) {
+		return fail(errWalletLocked.Error())
 	}
-	b, err := os.ReadFile(keyFile)
-	if err != nil {
-		return fail("Could not read the test wallet")
-	}
-	signer, err := signers.NewClientSignerFromPrivateKey(strings.TrimSpace(string(b)))
-	if err != nil {
-		return fail("Test wallet private key is invalid")
-	}
+	signer.beforeSign = beforeSign
 	client := x402.Newx402Client(x402.WithSpendControls(x402.SpendControls{MaxAmountPerPayment: "$" + p.PerPayment}))
 	consumed := false
 	client.OnBeforePaymentCreation(func(pc x402.PaymentCreationContext) (*x402.BeforePaymentCreationHookResult, error) {
@@ -131,9 +121,6 @@ func Pay(ctx context.Context, c Candidate, p Policy, keyFile string, scan interf
 		}
 		if pc.Ctx.Err() != nil {
 			return abort("Task timed out")
-		}
-		if err := beforeSign(); err != nil {
-			return abort("Could not durably record payment authorization; stopped")
 		}
 		consumed = true
 		return nil, nil

@@ -4,6 +4,8 @@
 .env.local
 artifacts/
 .buyer-key
+.seller-key
+*.keystore.json
 *.key
 
 # Build output and dependencies.

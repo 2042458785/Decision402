@@ -14,33 +14,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// This is a local, single-user demo vault. Agent secrets never enter the model
-// prompt or browser responses; the ignored artifacts directory must be backed up
-// if a funded test wallet needs to survive this machine.
+// Only encrypted secrets are persisted or held in the Agent registry.
 type agentRecord struct {
+	ID          string               `json:"id"`
+	Owner       string               `json:"owner"`
+	Name        string               `json:"name"`
+	Wallet      string               `json:"wallet"`
+	ModelURL    string               `json:"model_url"`
+	ModelName   string               `json:"model_name"`
+	Version     int                  `json:"vault_version,omitempty"`
+	KeyStore    json.RawMessage      `json:"keystore,omitempty"`
+	ModelSecret *keystore.CryptoJSON `json:"model_secret,omitempty"`
+}
+type agentView struct {
 	ID          string `json:"id"`
 	Owner       string `json:"owner"`
 	Name        string `json:"name"`
 	Wallet      string `json:"wallet"`
 	ModelURL    string `json:"model_url"`
 	ModelName   string `json:"model_name"`
-	ModelAPIKey string `json:"model_api_key,omitempty"`
-}
-
-type agentView struct {
-	ID        string `json:"id"`
-	Owner     string `json:"owner"`
-	Name      string `json:"name"`
-	Wallet    string `json:"wallet"`
-	ModelURL  string `json:"model_url"`
-	ModelName string `json:"model_name"`
+	Locked      bool   `json:"locked"`
+	UnlockUntil string `json:"unlock_until,omitempty"`
+	HasModelKey bool   `json:"has_model_key"`
 }
 
 func (a agentRecord) view() agentView {
-	return agentView{a.ID, a.Owner, a.Name, a.Wallet, a.ModelURL, a.ModelName}
+	return agentView{ID: a.ID, Owner: a.Owner, Name: a.Name, Wallet: a.Wallet, ModelURL: a.ModelURL, ModelName: a.ModelName, Locked: true, HasModelKey: a.ModelSecret != nil}
 }
 
 type challenge struct {
@@ -96,17 +99,14 @@ func (a *App) loadAgents() error {
 		if json.Unmarshal(b, &agent) != nil || !taskIDPattern.MatchString(agent.ID) || filepath.Base(path) != agent.ID+".json" || !addressPattern.MatchString(agent.Owner) || !addressPattern.MatchString(agent.Wallet) || agent.ModelURL != "https://api.deepseek.com" {
 			return errors.New("Agent vault metadata is invalid")
 		}
-		keyInfo, err := os.Lstat(a.agentFile(agent.ID, ".key"))
-		if err != nil || !keyInfo.Mode().IsRegular() || keyInfo.Mode().Perm()&0077 != 0 {
-			return errors.New("Agent wallet key must be a regular 0600 file")
+		wipe(b)
+		if agent.Version != 1 || len(agent.KeyStore) == 0 {
+			return errors.New("Only encrypted Agent wallets are supported")
 		}
-		key, err := os.ReadFile(a.agentFile(agent.ID, ".key"))
-		if err != nil {
-			return err
-		}
-		pk, err := crypto.HexToECDSA(strings.TrimSpace(string(key)))
-		if err != nil || !strings.EqualFold(crypto.PubkeyToAddress(pk.PublicKey).Hex(), agent.Wallet) {
-			return errors.New("Agent wallet does not match its key")
+		if _, err := os.Lstat(a.agentFile(agent.ID, ".key")); err == nil {
+			return errors.New("Plaintext Agent key file is unsupported")
+		} else if !os.IsNotExist(err) {
+			return errors.New("Could not inspect Agent key file")
 		}
 		a.agents[agent.ID] = agent
 	}
@@ -227,69 +227,4 @@ func (a *App) requireOwner(w http.ResponseWriter, r *http.Request) string {
 		jsonResponse(w, 401, map[string]string{"error": "Connect and sign in with your owner wallet"})
 	}
 	return owner
-}
-func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
-	owner := a.requireOwner(w, r)
-	if owner == "" {
-		return
-	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
-	var input struct {
-		Name        string `json:"name"`
-		ModelURL    string `json:"model_url"`
-		ModelName   string `json:"model_name"`
-		ModelAPIKey string `json:"model_api_key"`
-	}
-	if err != nil || strictJSON(b, &input) != nil {
-		jsonResponse(w, 400, map[string]string{"error": "Invalid agent configuration"})
-		return
-	}
-	input.Name = strings.TrimSpace(input.Name)
-	if len(input.Name) < 1 || len(input.Name) > 40 || input.ModelURL != "https://api.deepseek.com" || (input.ModelName != "deepseek-flash" && input.ModelName != "deepseek-v4-pro") || len(input.ModelAPIKey) > 256 || strings.ContainsAny(input.ModelAPIKey, "\r\n") {
-		jsonResponse(w, 400, map[string]string{"error": "Use a name, the official DeepSeek endpoint, and a supported model"})
-		return
-	}
-	if input.ModelAPIKey == "" && a.model.Key == "" {
-		jsonResponse(w, 400, map[string]string{"error": "Enter a DeepSeek API key or configure the server default"})
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(a.agents) >= 20 {
-		jsonResponse(w, 409, map[string]string{"error": "Local demo agent limit reached"})
-		return
-	}
-	id, err := randomHex(16)
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "Could not generate agent"})
-		return
-	}
-	pk, err := crypto.GenerateKey()
-	if err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "Could not generate wallet"})
-		return
-	}
-	agent := agentRecord{ID: id, Owner: owner, Name: input.Name, Wallet: crypto.PubkeyToAddress(pk.PublicKey).Hex(), ModelURL: input.ModelURL, ModelName: input.ModelName, ModelAPIKey: input.ModelAPIKey}
-	keyPath := a.agentFile(id, ".key")
-	if err := writePrivate(keyPath, []byte(hex.EncodeToString(crypto.FromECDSA(pk)))); err != nil {
-		jsonResponse(w, 500, map[string]string{"error": "Could not save wallet"})
-		return
-	}
-	metadata, _ := json.Marshal(agent)
-	if err := writePrivate(a.agentFile(id, ".json"), metadata); err != nil {
-		os.Remove(keyPath)
-		jsonResponse(w, 500, map[string]string{"error": "Could not save agent"})
-		return
-	}
-	d, err := os.Open(a.agentDir)
-	if err != nil || d.Sync() != nil {
-		if d != nil {
-			d.Close()
-		}
-		jsonResponse(w, 500, map[string]string{"error": "Agent created on disk but could not be confirmed; inspect vault before retrying"})
-		return
-	}
-	d.Close()
-	a.agents[id] = agent
-	jsonResponse(w, 201, agent.view())
 }
