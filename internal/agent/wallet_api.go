@@ -3,10 +3,8 @@ package agent
 import (
 	"crypto/ecdsa"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -51,17 +49,9 @@ func (a *App) grantFor(id string, r *http.Request) *walletGrant {
 	}
 	return g
 }
-func (a *App) needsMigration(record agentRecord) bool {
-	if record.Version != 1 {
-		return true
-	}
-	_, err := os.Lstat(a.agentFile(record.ID, ".key"))
-	return !os.IsNotExist(err)
-}
 func (a *App) walletView(record agentRecord, r *http.Request) agentView {
 	v := record.view()
-	v.NeedsMigration = a.needsMigration(record)
-	if g := a.grantFor(record.ID, r); g != nil && !v.NeedsMigration {
+	if g := a.grantFor(record.ID, r); g != nil {
 		v.Locked = false
 		v.UnlockUntil = g.expires.Format(time.RFC3339)
 	}
@@ -233,8 +223,7 @@ func (a *App) createOrRestoreAgent(w http.ResponseWriter, r *http.Request, resto
 	jsonResponse(w, 201, record.view())
 }
 func (a *App) walletAction(w http.ResponseWriter, r *http.Request) {
-	// Serialize changes, then re-read the record so a concurrent migration cannot
-	// restore stale plaintext metadata. Lock itself never waits on password KDFs.
+	// Serialize password operations. Lock itself never waits on password KDFs.
 	action := r.PathValue("action")
 	record, ok := a.ownedAgent(w, r)
 	if !ok {
@@ -265,27 +254,8 @@ func (a *App) walletAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if action == "migrate" {
-		if !validNewPassword(input.Password) {
-			jsonResponse(w, 400, map[string]string{"error": "Use a wallet password of 12 to 1024 bytes"})
-			return
-		}
-		if err := a.migrateWallet(record, input.Password); err != nil {
-			jsonResponse(w, 400, map[string]string{"error": err.Error()})
-			return
-		}
-		a.mu.Lock()
-		record = a.agents[record.ID]
-		a.mu.Unlock()
-		jsonResponse(w, 200, a.walletView(record, r))
-		return
-	}
 	if action != "unlock" && action != "backup" {
 		jsonResponse(w, 404, map[string]string{"error": "Unknown wallet action"})
-		return
-	}
-	if a.needsMigration(record) {
-		jsonResponse(w, 409, map[string]string{"error": "Encrypt this legacy wallet before using it"})
 		return
 	}
 	key, secret, err := decryptRecord(record, input.Password)
@@ -329,78 +299,4 @@ func (a *App) walletAction(w http.ResponseWriter, r *http.Request) {
 	a.grants[record.ID] = grant
 	a.vaultMu.Unlock()
 	jsonResponse(w, 200, a.walletView(record, r))
-}
-func (a *App) migrateWallet(record agentRecord, password string) error {
-	a.lockWallet(record.ID)
-	// Recover safely even if the previous atomic rename succeeded but its
-	// directory sync failed. Never overwrite encrypted metadata with stale data.
-	current, err := readPrivate(a.agentFile(record.ID, ".json"))
-	if err != nil {
-		return errors.New("Could not read wallet metadata")
-	}
-	defer wipe(current)
-	var disk agentRecord
-	if json.Unmarshal(current, &disk) != nil || disk.ID != record.ID || disk.Owner != record.Owner || disk.Wallet != record.Wallet || (disk.Version != 0 && disk.Version != 1) {
-		return errors.New("Wallet metadata changed; restart before retrying")
-	}
-	record = disk
-	if record.Version == 0 {
-		data, err := readPrivate(a.agentFile(record.ID, ".json"))
-		if err != nil {
-			return errors.New("Could not read legacy agent")
-		}
-		defer wipe(data)
-		var legacy struct {
-			ModelAPIKey string `json:"model_api_key"`
-		}
-		if json.Unmarshal(data, &legacy) != nil {
-			return errors.New("Invalid legacy agent")
-		}
-		defer func() { legacy.ModelAPIKey = "" }()
-		raw, err := readPrivate(a.agentFile(record.ID, ".key"))
-		if err != nil {
-			return errors.New("Could not read legacy wallet")
-		}
-		defer wipe(raw)
-		pk, err := crypto.HexToECDSA(strings.TrimSpace(string(raw)))
-		if err != nil {
-			return errors.New("Invalid legacy wallet")
-		}
-		defer wipeKey(pk)
-		if !strings.EqualFold(crypto.PubkeyToAddress(pk.PublicKey).Hex(), record.Wallet) {
-			return errors.New("Legacy wallet address does not match")
-		}
-		secret := []byte(legacy.ModelAPIKey)
-		defer wipe(secret)
-		record, err = encryptRecord(record, pk, secret, password, a.scryptN, a.scryptP)
-		if err != nil {
-			return errors.New("Encryption failed; legacy wallet kept")
-		}
-		encrypted, _ := json.Marshal(record)
-		if replacePrivate(a.agentFile(record.ID, ".json"), encrypted, a.agentDir) != nil {
-			return errors.New("Could not confirm encrypted wallet on disk; restart before retrying")
-		}
-		a.mu.Lock()
-		a.agents[record.ID] = record
-		a.mu.Unlock()
-	} else {
-		key, secret, err := decryptRecord(record, password)
-		if err != nil {
-			return errWalletPassword
-		}
-		wipeKey(key.PrivateKey)
-		wipe(secret)
-	}
-	a.mu.Lock()
-	a.agents[record.ID] = record
-	a.mu.Unlock()
-	// A crash here leaves a valid encrypted record and the old .key. Startup
-	// flags it for cleanup; repeating migration verifies the password first.
-	if err := os.Remove(a.agentFile(record.ID, ".key")); err != nil && !os.IsNotExist(err) {
-		return errors.New("Wallet encrypted; could not remove old key file. Run migration again")
-	}
-	if syncDirectory(a.agentDir) != nil {
-		return errors.New("Wallet encrypted; restart and check migration status")
-	}
-	return nil
 }

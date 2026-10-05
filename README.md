@@ -5,7 +5,6 @@
 | 操作 / Action | 现在怎么用 / How it works |
 |---|---|
 | 创建 / Create | 连接 MetaMask，填 Agent 信息、个人 DeepSeek Key 和至少 12 位钱包口令。私钥和个人 Key 加密保存，口令不保存。 / Connect MetaMask, enter Agent settings, a personal DeepSeek key and a wallet password of at least 12 characters. Wallet and model keys are encrypted; the password is not retained. |
-| 旧钱包 / Older wallets | 点“Encrypt old wallet”，输入并确认口令。加密成功后删除旧明文文件，地址不变。 / Use “Encrypt old wallet” and confirm a password. Successful migration removes the old plaintext file and keeps the address. |
 | 使用 / Use | 充值测试 USDC → 解锁 → Preview 或 Pay。解锁最长 10 分钟；个人模型 Key 也需要解锁后使用。 / Fund with test USDC → unlock → Preview or Pay. Unlock lasts up to 10 minutes; a personal model key also requires unlocking. |
 | 锁定 / Lock | 点“Lock now”或退出登录；重启后也会锁定。已签出的付款仍可能结算。 / Use “Lock now” or disconnect. Restart also locks wallets. Payments already signed may still settle. |
 | 备份 / Backup | 输入口令，下载加密 keystore；恢复时选择文件并输入原口令。钱包备份不含模型 Key，需要重新填写。 / Enter the password and download the encrypted keystore. Restore using the file and original password. Re-enter the model key; it is not in the wallet backup. |

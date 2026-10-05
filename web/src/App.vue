@@ -4,7 +4,7 @@ import Dropdown from './Dropdown.vue'
 import Scramble from './Scramble.vue'
 type Policy={per_payment:string;task_budget:string;max_risk:number;preference:string}
 type Request={id:string;agent_id:string;instruction:string;mode:string;policy:Policy}
-type Agent={wallet_kind:string;session_address?:string;id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string;locked:boolean;needs_migration:boolean;unlock_until?:string;has_model_key:boolean}
+type Agent={wallet_kind:string;session_address?:string;id:string;owner:string;name:string;wallet:string;model_url:string;model_name:string;locked:boolean;unlock_until?:string;has_model_key:boolean}
 type EthereumProvider={request:(args:{method:string;params?:unknown[]})=>Promise<any>;on?:(event:string,handler:(accounts:string[])=>void)=>void;removeListener?:(event:string,handler:(accounts:string[])=>void)=>void}
 declare global { interface Window { ethereum?: EthereumProvider } }
 type Candidate={service:{id:string;name:string;pay_to:string;amount:string};level:number;eligible:boolean;reason:string;source:string;quote?:{amount:string};risk?:{toxicScore?:number;traits?:{name:string;description:string}[];duration_ms:number}}
@@ -14,7 +14,7 @@ const mode=ref('simulate')
 const policy=ref<Policy>({per_payment:'0.10',task_budget:'0.10',max_risk:1,preference:'price'})
 const task=ref<Task|null>(null), config=ref<{model:string;asset:string;smart_wallet_available:boolean}|null>(null), error=ref(''), sending=ref(false)
 const owner=ref(''), agents=ref<Agent[]>([]), agentID=ref(''), agentName=ref('Tokyo buyer'), modelURL=ref('https://api.deepseek.com'), modelName=ref('deepseek-flash'), modelAPIKey=ref('')
-const walletPassword=ref(''), passwordConfirm=ref(''), actionPassword=ref(''), migrationConfirm=ref(''), backupFile=ref<File|null>(null), walletNotice=ref(''), clockNow=ref(Date.now())
+const walletPassword=ref(''), passwordConfirm=ref(''), actionPassword=ref(''), backupFile=ref<File|null>(null), walletNotice=ref(''), clockNow=ref(Date.now())
 let walletClock:ReturnType<typeof setInterval>|undefined
 const walletLocked=computed(()=>!selectedAgent.value || selectedAgent.value.locked || !selectedAgent.value.unlock_until || Date.parse(selectedAgent.value.unlock_until)<=clockNow.value)
 type SmartStatus={sessionKey:string;perPayment:string;dailyLimit:string;expiresAt:string;getRecipients:string[];reserved_today:string;gas_wei:string;chain_time:number}
@@ -186,7 +186,7 @@ async function fetchAgents(){
  if(!agents.value.some(a=>a.id===agentID.value))agentID.value=agents.value[0]?.id??''
  if(agentID.value){await refreshBalance();await refreshSmart()}
 }
-function chooseAgent(){smartStatus.value=null;smartTx.value='';linkAddress.value='';allowRecipients.value='';void refreshSmart();actionPassword.value='';migrationConfirm.value='';walletNotice.value='';localStorage.setItem('decision402-agent',agentID.value);balance.value='';fundTx.value='';void refreshBalance()}
+function chooseAgent(){smartStatus.value=null;smartTx.value='';linkAddress.value='';allowRecipients.value='';void refreshSmart();actionPassword.value='';walletNotice.value='';localStorage.setItem('decision402-agent',agentID.value);balance.value='';fundTx.value='';void refreshBalance()}
 async function connectWallet(){
  walletError.value='';agentBusy.value=true
  try{
@@ -218,15 +218,14 @@ async function createAgent(){
   if(!response.ok)throw new Error(result.error??'Could not create agent')
   modelAPIKey.value=''
   agents.value.push(result as Agent);agentID.value=result.id;localStorage.setItem('decision402-agent',result.id);balance.value='0';fundTx.value=''
-   smartStatus.value=null;walletNotice.value=result.wallet_kind==='smart'?'Session key saved and locked. Deploy a smart wallet below, or link your existing one.':'Legacy wallet restored and locked. Download a backup.'
+   smartStatus.value=null;walletNotice.value=result.wallet_kind==='smart'?'Session key saved and locked. Deploy a smart wallet below, or link your existing one.':'Ordinary wallet restored and locked. Download a backup.'
  }catch(e){walletError.value=e instanceof Error?e.message:'Could not create agent'}finally{agentBusy.value=false;walletPassword.value='';passwordConfirm.value='';modelAPIKey.value=''}
 }
 function selectBackup(event:Event){backupFile.value=(event.target as HTMLInputElement).files?.[0]??null}
-async function walletAction(action:'unlock'|'lock'|'migrate'|'backup'){
+async function walletAction(action:'unlock'|'lock'|'backup'){
  const agent=selectedAgent.value;if(!agent)return
  walletError.value='';walletNotice.value='';agentBusy.value=true
  try{
-  if(action==='migrate' && actionPassword.value!==migrationConfirm.value)throw new Error('The two wallet passwords do not match')
   const response=await fetch('/api/agents/'+agent.id+'/'+action,{method:'POST',headers:apiHeaders,body:JSON.stringify(action==='lock'?{}:{password:actionPassword.value})})
   if(!response.ok){const result=await response.json();throw new Error(result.error??'Wallet action failed')}
   if(action==='backup'){
@@ -236,9 +235,9 @@ async function walletAction(action:'unlock'|'lock'|'migrate'|'backup'){
   }else{
    const result=await response.json() as Agent
    agents.value=agents.value.map(a=>a.id===result.id?result:a)
-   walletNotice.value=action==='migrate'?'Encrypted. The old key file was removed. Download a backup.':action==='lock'?'Wallet locked. New signatures are blocked.':'Unlocked for up to 10 minutes.'
+   walletNotice.value=action==='lock'?'Wallet locked. New signatures are blocked.':'Unlocked for up to 10 minutes.'
   }
- }catch(e){walletError.value=e instanceof Error?e.message:'Wallet action failed'}finally{actionPassword.value='';migrationConfirm.value='';agentBusy.value=false}
+ }catch(e){walletError.value=e instanceof Error?e.message:'Wallet action failed'}finally{actionPassword.value='';agentBusy.value=false}
 }
 async function disconnectWallet(){
  walletError.value=''
@@ -248,7 +247,7 @@ async function disconnectWallet(){
   clearWalletUI()
  }catch(e){walletError.value=e instanceof Error?e.message:'Could not disconnect'}
 }
-function clearWalletUI(){smartStatus.value=null;linkAddress.value='';allowRecipients.value='';smartTx.value='';migrationConfirm.value='';owner.value='';agents.value=[];agentID.value='';balance.value='';task.value=null;actionPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value=''}
+function clearWalletUI(){smartStatus.value=null;linkAddress.value='';allowRecipients.value='';smartTx.value='';owner.value='';agents.value=[];agentID.value='';balance.value='';task.value=null;actionPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value=''}
 async function refreshBalance(){
  const agent=selectedAgent.value
  if(!agent?.wallet || !config.value)return
@@ -401,7 +400,7 @@ onMounted(async()=>{
 // The roller reads the scroll position directly; passive, because it never
 // prevents the scroll it is following.
 onMounted(()=>{window.addEventListener('scroll',onScroll,{passive:true});window.addEventListener('resize',onScroll);onScroll()})
-onUnmounted(()=>{migrationConfirm.value='';clearInterval(timer);clearInterval(walletClock);actionPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value='';window.ethereum?.removeListener?.('accountsChanged',walletChanged);window.removeEventListener('scroll',onScroll);window.removeEventListener('resize',onScroll)})
+onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);actionPassword.value='';walletPassword.value='';passwordConfirm.value='';modelAPIKey.value='';window.ethereum?.removeListener?.('accountsChanged',walletChanged);window.removeEventListener('scroll',onScroll);window.removeEventListener('resize',onScroll)})
 </script>
 
 <template>
@@ -427,22 +426,17 @@ onUnmounted(()=>{migrationConfirm.value='';clearInterval(timer);clearInterval(wa
    <div class="onboard-title"><span class="eyebrow">YOUR AGENT WORKSPACE</span><h2>Give an agent its own wallet.</h2><p>Keep control in MetaMask. Create a smart wallet, choose who the agent may pay, and set its limits. Base Sepolia test funds only.</p></div>
    <div class="onboard-grid">
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code><button v-if="owner" class="ghost-button" @click="disconnectWallet">Lock wallets and disconnect</button></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label><label>Wallet password<input v-model="walletPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" placeholder="At least 12 characters" /></label><label>Repeat password<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label><label>Restore an encrypted wallet <small>optional; use the backup's password</small><input type="file" accept=".json,application/json" @change="selectBackup" /></label><label v-if="backupFile">Backup type<Dropdown v-model="restoreKind" :options="[{value:'legacy',label:'Legacy wallet'},{value:'smart',label:'Smart wallet session key'}]" /></label><small>New agents use a smart wallet. The backup protects its session key; your MetaMask keeps owner control.</small></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':backupFile?'Restore key':'Create agent + session key'}} ↗</button></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label><label>Wallet password<input v-model="walletPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" placeholder="At least 12 characters" /></label><label>Repeat password<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label><label>Restore an encrypted wallet <small>optional; use the backup's password</small><input type="file" accept=".json,application/json" @change="selectBackup" /></label><label v-if="backupFile">Backup type<Dropdown v-model="restoreKind" :options="[{value:'legacy',label:'Ordinary Agent wallet'},{value:'smart',label:'Smart wallet session key'}]" /></label><small>New agents use a smart wallet. The backup protects its session key; your MetaMask keeps owner control.</small></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':backupFile?'Restore key':'Create agent + session key'}} ↗</button></div></div>
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+(a.wallet?shortAddress(a.wallet):'Needs deployment'),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet || 'Deploy the smart wallet below first'}}</code><span>Balance: {{balance || '—'}} test USDC</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent?.wallet || funding || smartBusy" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent?.wallet" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a></div><div class="onboard-shape circle" :class="{away:rolling}" aria-hidden="true"></div></div>
    </div>
    <div v-if="selectedAgent" class="wallet-security">
-    <h3>Wallet security · {{selectedAgent.needs_migration?'Encryption needed':walletLocked?'Locked':'Unlocked'}}</h3>
-    <p v-if="selectedAgent.needs_migration">Set a password to encrypt this older wallet and its model key before using it.</p>
-    <p v-else>Unlock lasts up to 10 minutes. Locking stops new signatures. Use Revoke onchain to stop unsettled smart wallet payments.</p>
+    <h3>Wallet security · {{walletLocked?'Locked':'Unlocked'}}</h3>
+    <p>Unlock lasts up to 10 minutes. Locking stops new signatures. Use Revoke onchain to stop unsettled smart wallet payments.</p>
     <label>Wallet password<input v-model="actionPassword" type="password" autocomplete="off" maxlength="1024" /></label>
-    <label v-if="selectedAgent.needs_migration">Repeat password<input v-model="migrationConfirm" type="password" autocomplete="off" maxlength="1024" /></label>
     <div class="onboard-actions">
-     <button v-if="selectedAgent.needs_migration" class="onboard-button" :disabled="agentBusy" @click="walletAction('migrate')">Encrypt old wallet</button>
-     <template v-else>
-      <button class="onboard-button" :disabled="agentBusy" @click="walletAction('unlock')">Unlock</button>
-      <button class="ghost-button" @click="walletAction('lock')">Lock now</button>
-      <button class="ghost-button" :disabled="agentBusy" @click="walletAction('backup')">Download encrypted backup</button>
-     </template>
+     <button class="onboard-button" :disabled="agentBusy" @click="walletAction('unlock')">Unlock</button>
+     <button class="ghost-button" @click="walletAction('lock')">Lock now</button>
+     <button class="ghost-button" :disabled="agentBusy" @click="walletAction('backup')">Download encrypted backup</button>
     </div>
    </div>
    <div v-if="selectedAgent?.wallet_kind==='smart'" class="wallet-security smart-controls">
@@ -480,13 +474,13 @@ onUnmounted(()=>{migrationConfirm.value='';clearInterval(timer);clearInterval(wa
    </div>
    <p v-if="walletNotice" role="status">{{walletNotice}}</p>
    <p v-if="walletError" class="error" role="alert">{{walletError}}</p>
-   <p class="onboard-disclaimer">Local testnet prototype. Session keys and personal model keys are encrypted on disk. Owner control stays in MetaMask; legacy wallets keep their original design. Export your encrypted wallet backup before moving this workspace. Use test USDC only.</p>
+   <p class="onboard-disclaimer">Local testnet prototype. Wallet keys and personal model keys are encrypted on disk. Smart wallet owner control stays in MetaMask. Export your encrypted wallet backup before moving this workspace. Use test USDC only.</p>
   </section>
   <section class="ask">
    <form class="ask-field" @submit.prevent="start">
     <input v-model="instruction" maxlength="2000" :disabled="active || !!pending"
       placeholder="What should the agent buy?" aria-label="What should the agent buy" />
-    <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment || (mode==='pay' && selectedAgent.wallet_kind==='smart' && (!selectedAgent.wallet || !smartAuthorized)) || selectedAgent.needs_migration || (walletLocked && (mode==='pay' || selectedAgent.has_model_key))">
+    <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment || (mode==='pay' && selectedAgent.wallet_kind==='smart' && (!selectedAgent.wallet || !smartAuthorized)) || (walletLocked && (mode==='pay' || selectedAgent.has_model_key))">
      <span>{{active?'Working':pending?'Retry':mode==='pay'?'Authorize payment':'Send'}}</span>
      <i :class="{spinner:active}" aria-hidden="true">{{active?'':'→'}}</i>
     </button>
@@ -494,7 +488,7 @@ onUnmounted(()=>{migrationConfirm.value='';clearInterval(timer);clearInterval(wa
    <div class="ask-meta">
     <span v-if="!selectedAgent" class="ask-need">Create an agent above before sending a task.</span>
     <span v-else-if="mode==='pay' && selectedAgent.wallet_kind==='smart' && !smartAuthorized">Deploy and authorize your smart wallet before payment.</span>
-    <span v-else-if="selectedAgent.needs_migration || (walletLocked && (mode==='pay' || selectedAgent.has_model_key))">Unlock the agent wallet above before sending this task.</span><span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
+    <span v-else-if="walletLocked && (mode==='pay' || selectedAgent.has_model_key)">Unlock the agent wallet above before sending this task.</span><span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
     <span class="ask-mode">{{mode==='simulate'?'POLICY SIMULATION':mode==='preview'?'LIVE PREVIEW · NO PAYMENT':'TESTNET EXECUTION'}}</span>
    </div>
   </section>

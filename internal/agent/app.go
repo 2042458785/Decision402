@@ -313,7 +313,7 @@ func (a *App) createTask(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, 409, map[string]string{"error": "Deploy and link the smart wallet before payment"})
 			return
 		}
-		if a.needsMigration(record) || ((request.Mode == "pay" || record.ModelSecret != nil) && grant == nil) {
+		if (request.Mode == "pay" || record.ModelSecret != nil) && grant == nil {
 			a.mu.Unlock()
 			jsonResponse(w, 423, map[string]string{"error": "Encrypt and unlock this wallet before using it"})
 			return

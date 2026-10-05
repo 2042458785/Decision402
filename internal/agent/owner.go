@@ -42,13 +42,12 @@ type agentView struct {
 	ModelURL       string `json:"model_url"`
 	ModelName      string `json:"model_name"`
 	Locked         bool   `json:"locked"`
-	NeedsMigration bool   `json:"needs_migration"`
 	UnlockUntil    string `json:"unlock_until,omitempty"`
 	HasModelKey    bool   `json:"has_model_key"`
 }
 
 func (a agentRecord) view() agentView {
-	return agentView{WalletKind: a.WalletKind, SessionAddress: a.SessionAddress, ID: a.ID, Owner: a.Owner, Name: a.Name, Wallet: a.Wallet, ModelURL: a.ModelURL, ModelName: a.ModelName, Locked: true, NeedsMigration: a.Version != 1, HasModelKey: a.ModelSecret != nil}
+	return agentView{WalletKind: a.WalletKind, SessionAddress: a.SessionAddress, ID: a.ID, Owner: a.Owner, Name: a.Name, Wallet: a.Wallet, ModelURL: a.ModelURL, ModelName: a.ModelName, Locked: true, HasModelKey: a.ModelSecret != nil}
 }
 
 type challenge struct {
@@ -105,16 +104,13 @@ func (a *App) loadAgents() error {
 			return errors.New("Agent vault metadata is invalid")
 		}
 		wipe(b)
-		if agent.Version != 0 && agent.Version != 1 {
-			return errors.New("Unsupported wallet format")
+		if agent.Version != 1 || len(agent.KeyStore) == 0 {
+			return errors.New("Only encrypted Agent wallets are supported")
 		}
-		if agent.Version == 0 {
-			info, err := os.Lstat(a.agentFile(agent.ID, ".key"))
-			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-				return errors.New("Legacy wallet key must be a regular 0600 file")
-			}
-		} else if len(agent.KeyStore) == 0 {
-			return errors.New("Encrypted wallet is missing")
+		if _, err := os.Lstat(a.agentFile(agent.ID, ".key")); err == nil {
+			return errors.New("Plaintext Agent key file is unsupported")
+		} else if !os.IsNotExist(err) {
+			return errors.New("Could not inspect Agent key file")
 		}
 		a.agents[agent.ID] = agent
 	}

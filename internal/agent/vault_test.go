@@ -93,7 +93,7 @@ func TestEncryptedWalletLifecycleAndBackup(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(originalLog)
 	v := f.create(t)
-	if !v.Locked || v.NeedsMigration {
+	if !v.Locked {
 		t.Fatal("new wallet should be encrypted and locked")
 	}
 	record := f.app.agents[v.ID]
@@ -119,7 +119,7 @@ func TestEncryptedWalletLifecycleAndBackup(t *testing.T) {
 	if _, err = os.Stat(f.app.agentFile(v.ID, ".key")); !os.IsNotExist(err) {
 		t.Fatal("plaintext key file created")
 	}
-	for _, action := range []string{"unlock", "backup", "lock", "migrate"} {
+	for _, action := range []string{"unlock", "backup", "lock"} {
 		expectStatus(t, f.action(t, v.ID, action, testWalletPassword, f.other), 404)
 		expectStatus(t, f.action(t, v.ID, action, testWalletPassword, nil), 401)
 	}
@@ -254,66 +254,39 @@ func TestWalletExpiryAndLockDuringSignature(t *testing.T) {
 		t.Fatal("lock retained secret buffers")
 	}
 }
-func TestLegacyWalletMigrationAndInterruptedCleanup(t *testing.T) {
+func TestPlaintextWalletFilesRejected(t *testing.T) {
 	f := newWalletTestApp(t)
-	pk, _ := crypto.GenerateKey()
-	defer wipeKey(pk)
-	id := "legacy-wallet-00001"
-	address := crypto.PubkeyToAddress(pk.PublicKey).Hex()
-	metadata := map[string]any{"id": id, "owner": testPayTo, "name": "Old wallet", "wallet": address, "model_url": "https://api.deepseek.com", "model_name": "deepseek-flash", "model_api_key": testModelSecret}
-	data, _ := json.Marshal(metadata)
-	raw := []byte(hex.EncodeToString(crypto.FromECDSA(pk)))
-	defer wipe(raw)
-	if writePrivate(f.app.agentFile(id, ".json"), data) != nil || writePrivate(f.app.agentFile(id, ".key"), raw) != nil {
-		t.Fatal("fixture failed")
-	}
-	if err := f.app.loadAgents(); err != nil {
+	v := f.create(t)
+	keyPath := f.app.agentFile(v.ID, ".key")
+	if err := writePrivate(keyPath, []byte("retired-plaintext-key")); err != nil {
 		t.Fatal(err)
 	}
-	expectStatus(t, f.action(t, id, "unlock", testWalletPassword, f.cookie), 409)
-	expectStatus(t, f.action(t, id, "migrate", "short", f.cookie), 400)
-	before, _ := os.ReadFile(f.app.agentFile(id, ".key"))
-	if !bytes.Equal(before, raw) {
-		t.Fatal("failed migration changed old key")
+	if err := f.app.loadAgents(); err == nil {
+		t.Fatal("plaintext key file was accepted")
 	}
-	expectStatus(t, f.action(t, id, "migrate", testWalletPassword, f.cookie), 200)
-	if _, err := os.Stat(f.app.agentFile(id, ".key")); !os.IsNotExist(err) {
-		t.Fatal("migration left plaintext key")
-	}
-	encrypted, _ := os.ReadFile(f.app.agentFile(id, ".json"))
-	if bytes.Contains(encrypted, raw) || bytes.Contains(encrypted, []byte(testModelSecret)) {
-		t.Fatal("migration left plaintext secret")
-	}
-	key, secret, err := decryptRecord(f.app.agents[id], testWalletPassword)
-	if err != nil || key.Address.Hex() != address || string(secret) != testModelSecret {
-		t.Fatal("migration changed wallet/model key")
-	}
-	wipeKey(key.PrivateKey)
-	wipe(secret)
-	// Simulate power loss after encrypted metadata was committed but before .key removal.
-	if writePrivate(f.app.agentFile(id, ".key"), raw) != nil {
-		t.Fatal("fixture failed")
-	}
-	expectStatus(t, f.action(t, id, "unlock", testWalletPassword, f.cookie), 409)
-	expectStatus(t, f.action(t, id, "migrate", "wrong-password", f.cookie), 400)
-	if _, err := os.Stat(f.app.agentFile(id, ".key")); err != nil {
-		t.Fatal("wrong password deleted original")
-	}
-	// Also simulate stale in-memory metadata after a directory-sync failure.
-	stale := f.app.agents[id]
-	stale.Version = 0
-	f.app.agents[id] = stale
-	expectStatus(t, f.action(t, id, "migrate", testWalletPassword, f.cookie), 200)
-	// Reload verifies both the crash cleanup and the preserved encrypted model key.
-	if err := f.app.loadAgents(); err != nil {
+	if err := os.Remove(keyPath); err != nil {
 		t.Fatal(err)
 	}
-	key, secret, err = decryptRecord(f.app.agents[id], testWalletPassword)
-	if err != nil || string(secret) != testModelSecret {
-		t.Fatal("crash recovery lost model key")
+	path := f.app.agentFile(v.ID, ".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	wipeKey(key.PrivateKey)
-	wipe(secret)
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	delete(record, "vault_version")
+	legacy, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replacePrivate(path, legacy, f.app.agentDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.loadAgents(); err == nil {
+		t.Fatal("plaintext-era record was accepted")
+	}
 }
 func TestKeystoreRejectsMalformedAndExcessiveKDF(t *testing.T) {
 	f := newWalletTestApp(t)
