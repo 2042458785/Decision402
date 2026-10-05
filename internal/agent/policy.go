@@ -64,14 +64,13 @@ type Service struct {
 	Amount string `json:"amount"`
 }
 type Candidate struct {
-	WalletReason string                     `json:"wallet_reason,omitempty"`
-	Service      Service                    `json:"service"`
-	Quote        *types.PaymentRequirements `json:"quote,omitempty"`
-	Risk         *probe.Decision            `json:"risk,omitempty"`
-	Level        int                        `json:"level"` // -1 unknown, 0 no flags, 1 approved advisory risk, 2 blocked.
-	Eligible     bool                       `json:"eligible"`
-	Reason       string                     `json:"reason"`
-	Source       string                     `json:"source"`
+	Service  Service                    `json:"service"`
+	Quote    *types.PaymentRequirements `json:"quote,omitempty"`
+	Risk     *probe.Decision            `json:"risk,omitempty"`
+	Level    int                        `json:"level"` // -1 unknown, 0 no flags, 1 approved advisory risk, 2 blocked.
+	Eligible bool                       `json:"eligible"`
+	Reason   string                     `json:"reason"`
+	Source   string                     `json:"source"`
 }
 
 func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
@@ -89,8 +88,6 @@ func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
 		}
 		amount, err := strconv.ParseInt(c.Quote.Amount, 10, 64)
 		switch {
-		case c.WalletReason != "":
-			c.Reason = c.WalletReason
 		case c.Level < 0:
 			if c.Reason == "" {
 				c.Reason = "Risk information unavailable; payment on hold"

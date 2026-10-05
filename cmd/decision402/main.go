@@ -54,13 +54,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rpcURL := strings.TrimSpace(os.Getenv("DECISION402_RPC_URL"))
-	if rpcURL == "" {
-		rpcURL = "https://sepolia.base.org"
-	}
-	if err := app.EnableSmartWallets(rpcURL); err != nil {
-		log.Fatal("Invalid smart wallet RPC configuration")
-	}
 	handler := app.Handler(*web)
 	log.Printf("Decision402: http://%s | model=%s | Base Sepolia only", *listen, cfg.DeepSeekModel)
 	log.Fatal((&http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}).ListenAndServe())

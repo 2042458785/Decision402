@@ -132,12 +132,6 @@ func Pay(ctx context.Context, c Candidate, p Policy, signer *walletSigner, scan 
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.Service.URL, nil)
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		signer.failureMu.Lock()
-		failure := signer.failure
-		signer.failureMu.Unlock()
-		if failure != "" {
-			return fail("Payment stopped: " + failure)
-		}
 		return fail("Payment request failed; inspect the final check. If authorization was signed, settlement is unknown and will not be retried automatically")
 	}
 	defer resp.Body.Close()

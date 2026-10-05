@@ -15,7 +15,3 @@ node_modules/
 # Editor and OS noise.
 .idea/
 .DS_Store
-
-# Smart wallet build output
-contracts/out/
-contracts/cache/
