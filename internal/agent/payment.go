@@ -14,9 +14,7 @@ import (
 	"Decision402/internal/probe"
 	x402 "github.com/x402-foundation/x402/go/v2"
 	xhttp "github.com/x402-foundation/x402/go/v2/http"
-	nethttpmw "github.com/x402-foundation/x402/go/v2/http/nethttp"
 	buyer "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/client"
-	seller "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/server"
 	"github.com/x402-foundation/x402/go/v2/types"
 )
 
@@ -24,7 +22,10 @@ func noRedirectClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 func Quote(ctx context.Context, s Service) (*types.PaymentRequirements, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", s.URL, nil)
+	req, err := serviceRequest(ctx, s)
+	if err != nil {
+		return nil, errors.New("Could not construct the service request")
+	}
 	resp, err := noRedirectClient(20 * time.Second).Do(req)
 	if err != nil {
 		return nil, errors.New("Could not fetch the service offer")
@@ -42,33 +43,23 @@ func Quote(ctx context.Context, s Service) (*types.PaymentRequirements, error) {
 		return nil, errors.New("Offer encoding is invalid")
 	}
 	var offer types.PaymentRequired
-	if json.Unmarshal(b, &offer) != nil || offer.X402Version != 2 || len(offer.Accepts) != 1 {
+	if json.Unmarshal(b, &offer) != nil || offer.X402Version != 2 || len(offer.Accepts) == 0 {
 		return nil, errors.New("Offer format or number of payment options is invalid")
 	}
-	q := offer.Accepts[0]
-	if err := CheckQuote(q, s); err != nil {
-		return nil, err
+	var match *types.PaymentRequirements
+	for _, q := range offer.Accepts {
+		if CheckQuote(q, s) == nil {
+			if match != nil {
+				return nil, errors.New("Offer has duplicate matching payment options")
+			}
+			selected := q
+			match = &selected
+		}
 	}
-	return &q, nil
-}
-
-func sampleData(id string) map[string]any {
-	return map[string]any{"provider": id, "city": "Tokyo", "temperature_c": 23, "sample_only": true, "description": "Static demo weather, not current weather"}
-}
-func SellerHandler(services []Service) http.Handler {
-	routes := xhttp.RoutesConfig{}
-	mux := http.NewServeMux()
-	for _, s := range services {
-		path := "/services/" + s.ID + "/data"
-		prices := map[string]string{"A": "$0.005", "B": "$0.02", "C": "$0.01", "D": "$0.05"}
-		routes["GET "+path] = xhttp.RouteConfig{Accepts: xhttp.PaymentOptions{{Scheme: "exact", Price: prices[s.ID], Network: Network, PayTo: s.PayTo}}, Description: "Static Tokyo demo weather dataset", MimeType: "application/json"}
-		id := s.ID
-		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sampleData(id))
-		})
+	if match == nil {
+		return nil, errors.New("No verified Base Sepolia pay-per-request USDC offer")
 	}
-	return nethttpmw.X402Payment(nethttpmw.Config{Routes: routes, Facilitator: xhttp.NewHTTPFacilitatorClient(&xhttp.FacilitatorConfig{URL: "https://x402.org/facilitator"}), Schemes: []nethttpmw.SchemeConfig{{Network: x402.Network(Network), Server: seller.NewExactEvmScheme()}}, Timeout: 30 * time.Second})(mux)
+	return match, nil
 }
 
 type PaymentOutcome struct {
@@ -91,7 +82,22 @@ func Pay(ctx context.Context, c Candidate, p Policy, signer *walletSigner, scan 
 		return fail(errWalletLocked.Error())
 	}
 	signer.beforeSign = beforeSign
-	client := x402.Newx402Client(x402.WithSpendControls(x402.SpendControls{MaxAmountPerPayment: "$" + p.PerPayment}))
+	if c.Quote == nil {
+		return fail("No approved quote")
+	}
+	client := x402.Newx402Client(
+		x402.WithSpendControls(x402.SpendControls{MaxAmountPerPayment: "$" + p.PerPayment}),
+		x402.WithPolicy(func(options []x402.PaymentRequirementsView) []x402.PaymentRequirementsView {
+			approved := make([]x402.PaymentRequirementsView, 0, 1)
+			for _, option := range options {
+				q, ok := option.(types.PaymentRequirements)
+				if ok && reflect.DeepEqual(q, *c.Quote) {
+					approved = append(approved, option)
+				}
+			}
+			return approved
+		}),
+	)
 	consumed := false
 	client.OnBeforePaymentCreation(func(pc x402.PaymentCreationContext) (*x402.BeforePaymentCreationHookResult, error) {
 		abort := func(msg string) (*x402.BeforePaymentCreationHookResult, error) {
@@ -125,11 +131,18 @@ func Pay(ctx context.Context, c Candidate, p Policy, signer *walletSigner, scan 
 		consumed = true
 		return nil, nil
 	})
-	client.OnAfterPaymentCreation(func(x402.PaymentCreatedContext) error { outcome.Signed = true; return nil })
+	client.OnAfterPaymentCreation(func(x402.PaymentCreatedContext) error {
+		outcome.Signed = true
+		emit("payment_signed", map[string]string{"service": c.Service.ID})
+		return nil
+	})
 	client.Register(x402.Network(Network), buyer.NewExactEvmScheme(signer, nil))
 	protocol := xhttp.Newx402HTTPClient(client)
 	httpClient := xhttp.WrapHTTPClientWithPayment(noRedirectClient(55*time.Second), protocol)
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.Service.URL, nil)
+	req, err := serviceRequest(ctx, c.Service)
+	if err != nil {
+		return fail("Could not construct the service request")
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fail("Payment request failed; inspect the final check. If authorization was signed, settlement is unknown and will not be retried automatically")
@@ -146,6 +159,10 @@ func Pay(ctx context.Context, c Candidate, p Policy, signer *walletSigner, scan 
 	if err != nil || len(data) > 65536 || !json.Valid(data) || resp.StatusCode != 200 {
 		return fail("Payment settled, but service data could not be read; do not pay again")
 	}
-	outcome.Data = data
+	checked, err := checkedServiceData(c.Service, data)
+	if err != nil {
+		return fail("Payment settled, but the service data was invalid; do not pay again")
+	}
+	outcome.Data = checked
 	return outcome
 }

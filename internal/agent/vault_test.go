@@ -31,7 +31,7 @@ type walletTestApp struct {
 
 func newWalletTestApp(t *testing.T) *walletTestApp {
 	t.Helper()
-	app, err := NewApp("127.0.0.1:8080", filepath.Join(t.TempDir(), "tasks"), NewModel("server-default-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"}, testPayTo, testRisk)
+	app, err := NewApp("127.0.0.1:8080", filepath.Join(t.TempDir(), "tasks"), NewModel("server-default-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestEncryptedWalletLifecycleAndBackup(t *testing.T) {
 	expectStatus(t, restored.call(t, "/api/agents/restore", input, restored.cookie), 409)
 	input.Password = "incorrect-password"
 	expectStatus(t, newWalletTestApp(t).call(t, "/api/agents/restore", input, f.cookie), 400)
-	restarted, err := NewApp(f.app.host, f.app.dir, f.app.model, f.app.scanner, testPayTo, testRisk)
+	restarted, err := NewApp(f.app.host, f.app.dir, f.app.model, f.app.scanner)
 	if err != nil {
 		t.Fatal(err)
 	}

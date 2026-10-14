@@ -40,6 +40,9 @@ func selectionSummary(p Policy, candidates []Candidate, selected *Candidate) str
 	}
 	amount, _ := strconv.ParseInt(selected.Quote.Amount, 10, 64)
 	price := strings.TrimRight(strings.TrimRight(FormatMoney(amount), "0"), ".")
+	if len(candidates) == 1 {
+		return fmt.Sprintf("Screening: %s. Selection: %s is the only connected service (%s USDC).", strings.Join(filters, "; "), selected.Service.ID, price)
+	}
 	preference := "price first"
 	if p.Preference == "risk" {
 		preference = "risk first; price breaks ties"

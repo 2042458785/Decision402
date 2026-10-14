@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,7 +22,7 @@ import (
 
 func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tasks")
-	a, err := NewApp("127.0.0.1:8080", dir, NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", dir, NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +116,11 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	if list.Code != 200 || strings.Contains(list.Body.String(), "agent-model-secret") {
 		t.Fatal("agent list leaked key")
 	}
-	reloaded, err := NewApp(a.host, dir, a.model, a.scanner, testPayTo, testRisk)
+	reloaded, err := NewApp(a.host, dir, a.model, a.scanner)
 	if err != nil || reloaded.agents[view.ID].Wallet != view.Wallet {
 		t.Fatalf("wallet did not survive restart: %v", err)
 	}
-	request := TaskRequest{ID: "test-agent-task-0001", AgentID: view.ID, Instruction: "Tokyo weather", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
+	request := TaskRequest{ID: "test-agent-task-0001", AgentID: view.ID, Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
 	requestJSON, _ := json.Marshal(request)
 	if unauthorized := call("POST", "/api/tasks", string(requestJSON), nil); unauthorized.Code != 403 {
 		t.Fatal("task accepted without wallet session")
@@ -136,7 +137,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	var turns atomic.Int32
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := "find_services"
-		args := `{"city":"Tokyo"}`
+		args := `{"address":"0x3333333333333333333333333333333333333333"}`
 		if turns.Add(1) > 1 {
 			name, args = "execute_purchase", `{}`
 		}
@@ -144,20 +145,13 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	}))
 	defer modelServer.Close()
 	var paid atomic.Int32
-	services := map[string]Service{}
-	for _, s := range a.services {
-		services[s.ID] = s
-	}
 	sellerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/data"), "/services/")
-		s, ok := services[id]
-		if !ok {
-			http.NotFound(w, r)
-			return
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
 		}
 		if r.Header.Get("PAYMENT-SIGNATURE") == "" {
-			q := *testQuote(s.Amount)
-			q.PayTo = s.PayTo
+			q := *testQuote(quickNodePrice)
+			q.PayTo = quickNodePayTo
 			b, _ := json.Marshal(types.PaymentRequired{X402Version: 2, Accepts: []types.PaymentRequirements{q}})
 			w.Header().Set("PAYMENT-REQUIRED", base64.StdEncoding.EncodeToString(b))
 			w.WriteHeader(402)
@@ -171,16 +165,14 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 		b, _ := json.Marshal(map[string]any{"success": true, "network": Network, "transaction": "0x" + strings.Repeat("a", 64)})
 		w.Header().Set("PAYMENT-RESPONSE", base64.StdEncoding.EncodeToString(b))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"sample_only":true}`))
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":"0x%064x"}`, 42000000)
 	}))
 	defer sellerServer.Close()
-	for i := range a.services {
-		a.services[i].URL = sellerServer.URL + "/services/" + a.services[i].ID + "/data"
-	}
+	a.services[0].URL = sellerServer.URL
 	configured := a.agents[view.ID]
 	configured.ModelURL = modelServer.URL
 	a.agents[view.ID] = configured
-	payRequest := TaskRequest{ID: "test-agent-payment-01", AgentID: view.ID, Instruction: "Tokyo weather", Mode: "pay", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}}
+	payRequest := TaskRequest{ID: "test-agent-payment-01", AgentID: view.ID, Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "pay", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}}
 	a.tasks[payRequest.ID] = &Task{Request: payRequest, Status: "queued", Events: []Event{}, Candidates: []Candidate{}}
 	unlocked := call("POST", "/api/agents/"+view.ID+"/unlock", `{"password":"test-wallet-password"}`, cookie)
 	if unlocked.Code != 200 {
@@ -189,7 +181,7 @@ func TestOwnerSignInAgentVaultAndTaskBoundary(t *testing.T) {
 	a.run(payRequest, a.grants[view.ID])
 	a.lockWallet(view.ID)
 	result := a.tasks[payRequest.ID]
-	if result.Status != "settled" || result.Payment == nil || !result.Payment.Settled || paid.Load() != 1 {
+	if result.Status != "settled" || result.Payment == nil || !result.Payment.Settled || paid.Load() != 1 || !strings.Contains(string(result.Payment.Data), "42.000000") {
 		t.Fatalf("agent payment did not settle with generated wallet: status=%s paid=%d summary=%s error=%s payment=%+v", result.Status, paid.Load(), result.Summary, result.Error, result.Payment)
 	}
 }

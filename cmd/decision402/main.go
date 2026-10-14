@@ -16,14 +16,14 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:8080", "local UI + API + demo sellers")
+	listen := flag.String("listen", "127.0.0.1:8080", "local UI + API")
 	web := flag.String("web", "web/dist", "built Vue frontend")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || host != "127.0.0.1" {
 		log.Fatal("bind to 127.0.0.1 only")
 	}
-	cfg, err := probe.LoadConfig(".env")
+	cfg, err := probe.LoadAgentConfig(".env")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,11 +50,11 @@ func main() {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		log.Fatal("another Decision402 instance owns the task journal")
 	}
-	app, err := agent.NewApp(*listen, dir, agent.NewModel(cfg.DeepSeekKey, cfg.DeepSeekModel, cfg.DeepSeekURL), probe.NewClient(cfg.APIKey, 15*time.Second, cfg.LowRiskTraits...), cfg.NormalAddress, cfg.RiskAddress, cfg.LowRiskAddress)
+	app, err := agent.NewApp(*listen, dir, agent.NewModel(cfg.DeepSeekKey, cfg.DeepSeekModel, cfg.DeepSeekURL), probe.NewClient(cfg.APIKey, 15*time.Second, cfg.LowRiskTraits...))
 	if err != nil {
 		log.Fatal(err)
 	}
 	handler := app.Handler(*web)
-	log.Printf("Decision402: http://%s | model=%s | Base Sepolia only", *listen, cfg.DeepSeekModel)
+	log.Printf("Decision402: http://%s | model=%s | Base Sepolia payments, Base mainnet data", *listen, cfg.DeepSeekModel)
 	log.Fatal((&http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}).ListenAndServe())
 }

@@ -40,7 +40,7 @@ func tool(name, description string, properties map[string]any, required []string
 }
 
 var agentTools = []map[string]any{
-	tool("find_services", "Find and screen paid services for a Tokyo weather dataset. Only Tokyo is supported. Does not pay.", map[string]any{"city": map[string]any{"type": "string", "description": "City requested by the user. Only Tokyo is available."}}, []string{"city"}),
+	tool("find_services", "Find and screen the QuickNode service for a Base mainnet USDC balance query. Does not pay. The address must appear exactly in the user instruction.", map[string]any{"address": map[string]any{"type": "string", "description": "The Base mainnet wallet address supplied by the user."}}, []string{"address"}),
 	tool("execute_purchase", "After find_services, ask the server to select under the user's immutable policy and execute this task once. Cannot override policy or choose a payee. Simulation never pays.", map[string]any{}, []string{}),
 }
 

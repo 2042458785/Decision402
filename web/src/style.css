@@ -630,6 +630,8 @@ textarea { resize: vertical; font-size: 14px; line-height: 1.65; min-height: 108
 .receipt-top a { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
 .receipt-top a:hover { text-decoration: underline; }
 .receipt.unconfirmed .receipt-check { color: var(--warn); background: var(--warn-wash); border-color: #e6d5ae; }
+.balance-result { margin: 17px 0 0; font: 12px var(--mono); color: var(--grey); overflow-wrap: anywhere; line-height: 1.6; }
+.balance-result strong { display: block; margin-top: 5px; font-family: inherit; font-size: 24px; font-weight: 600; color: var(--ink); }
 .response-details { border-top: 1px solid var(--hair); margin-top: 15px; padding-top: 13px; }
 .response-details summary {
   display: flex; justify-content: space-between; list-style: none; cursor: pointer;

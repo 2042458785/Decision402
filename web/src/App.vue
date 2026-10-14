@@ -9,12 +9,13 @@ type Withdrawal={id:string;agent_id:string;to:string;amount:string;transaction:s
 type EthereumProvider={request:(args:{method:string;params?:unknown[]})=>Promise<any>;on?:(event:string,handler:(accounts:string[])=>void)=>void;removeListener?:(event:string,handler:(accounts:string[])=>void)=>void}
 declare global { interface Window { ethereum?: EthereumProvider } }
 type Candidate={service:{id:string;name:string;pay_to:string;amount:string};level:number;eligible:boolean;reason:string;source:string;quote?:{amount:string};risk?:{toxicScore?:number;traits?:{name:string;description:string}[];duration_ms:number}}
-type Task={request:Request;status:string;candidates:Candidate[];selected?:Candidate;events:{time:string;kind:string;data:unknown}[];summary:string;error?:string;payment_attempted:boolean;payment?:{settled:boolean;signed:boolean;transaction?:string;error?:string;data?:unknown}}
-const instruction=ref('Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.')
-const mode=ref('simulate')
-const policy=ref<Policy>({per_payment:'0.10',task_budget:'0.10',max_risk:1,preference:'price'})
+type Task={request:Request;status:string;candidates:Candidate[];selected?:Candidate;events:{time:string;kind:string;data:unknown}[];summary:string;error?:string;payment_attempted:boolean;payment?:{settled:boolean;signed:boolean;transaction?:string;error?:string;data?:{balance_usdc?:string;wallet_address?:string;chain?:string;token?:string;block_tag?:string}}}
+const taskPrompt='请通过 QuickNode 查询 Base 主网钱包的 USDC 余额，钱包地址：'
+const instruction=ref(taskPrompt)
+const mode=ref('preview')
+const policy=ref<Policy>({per_payment:'0.10',task_budget:'0.10',max_risk:0,preference:'price'})
 const task=ref<Task|null>(null), config=ref<{model:string;asset:string}|null>(null), error=ref(''), sending=ref(false)
-const owner=ref(''), agents=ref<Agent[]>([]), agentID=ref(''), agentName=ref('Tokyo buyer'), modelURL=ref('https://api.deepseek.com'), modelName=ref('deepseek-flash'), modelAPIKey=ref('')
+const owner=ref(''), agents=ref<Agent[]>([]), agentID=ref(''), agentName=ref('Base data buyer'), modelURL=ref('https://api.deepseek.com'), modelName=ref('deepseek-flash'), modelAPIKey=ref('')
 const walletPassword=ref(''), passwordConfirm=ref(''), actionPassword=ref(''), backupFile=ref<File|null>(null), walletNotice=ref(''), clockNow=ref(Date.now())
 let walletClock:ReturnType<typeof setInterval>|undefined
 const walletLocked=computed(()=>!selectedAgent.value || selectedAgent.value.locked || !selectedAgent.value.unlock_until || Date.parse(selectedAgent.value.unlock_until)<=clockNow.value)
@@ -28,7 +29,7 @@ const initializing=ref(true)
 let timer:ReturnType<typeof setInterval>|undefined
 const active=computed(()=>sending.value || ['queued','running'].includes(task.value?.status??''))
 const statusNames:Record<string,string>={queued:'Queued',running:'Agent running',previewed:'Preview complete · No payment',settled:'Settled on testnet',held:'On hold',unknown:'Settlement unconfirmed',error:'Failed'}
-const eventNames:Record<string,string>={model:'Agent reasoning and tool choice',tool:'Tool call',candidate:'Offer and risk screening',selection:'Policy selection',final_risk:'Final pre-signing check',authorization_reserved:'Payment authorization reserved'}
+const eventNames:Record<string,string>={model:'DeepSeek 处理任务',tool:'Agent 调用工具',quote_requested:'已向 QuickNode 请求报价',quote_received:'已收到 HTTP 402 报价',risk_requested:'正在查询收款地址风险',candidate:'报价与风险检查结果',selection:'已检查预算并选择服务',payment_requested:'正在复核并付款',final_risk:'签名前再次检查风险',authorization_reserved:'已记录付款尝试',payment_signed:'已签名，等待付款结果'}
 const money=(value:string)=> (Number(value)/1e6).toFixed(3)
 const blockedPayment=computed(()=>mode.value==='pay' && !!task.value?.payment_attempted && !task.value?.payment?.settled)
 const containsHan=(value:string)=>/[\u3400-\u9fff]/u.test(value)
@@ -161,14 +162,38 @@ const traitLabel=(value:string)=>value.replace(/_/g,' ')
 // started, so the sequence could never show anything working. The first step
 // that is not done, while the task is still running, is the one in progress.
 const flowSteps=computed(()=>{
+ const events=task.value?.events??[]
+ const has=(kind:string)=>events.some(e=>e.kind===kind)
+ const simulated=task.value?.request.mode==='simulate'
+ const paying=task.value?.request.mode==='pay'
  const steps=[
-  {label:'Discover',done:!!task.value?.candidates.length,active:false},
-  {label:'Screen',done:!!task.value?.candidates.some(c=>c.risk),active:false},
-  {label:'Select',done:!!task.value?.selected,active:false},
-  {label:'Settle',done:task.value?.request.mode==='pay'?!!task.value?.payment?.settled:!!task.value?.selected,active:false},
+  {label:'读取报价',done:simulated?!!task.value?.candidates.length:has('quote_received'),active:false},
+  {label:'检查风险',done:simulated?!!task.value?.candidates.length:!!task.value?.candidates.some(c=>c.risk),active:false},
+  {label:'检查预算',done:!!task.value?.candidates.length,active:false},
+  {label:paying?'付款并取回数据':'完成预览',done:paying?!!task.value?.payment?.data:task.value?.status==='previewed',active:false},
  ]
  if(active.value){const next=steps.find(s=>!s.done);if(next)next.active=true}
  return steps
+})
+const progressInfo=computed(()=>{
+ const t=task.value
+ if(!t)return {title:'',detail:''}
+ const events=t.events??[]
+ const last=events.at(-1)
+ if(!['queued','running'].includes(t.status)){
+  const contacted=events.some(e=>e.kind==='quote_requested')
+  return {title:contacted?'本次任务已停止':'本次任务没有请求 QuickNode',detail:t.error||t.summary||'没有取得可用报价。'}
+ }
+ if(t.status==='queued')return {title:'任务已提交，等待开始',detail:'尚未请求 QuickNode，也没有付款。'}
+ switch(last?.kind){
+  case 'model':return {title:'DeepSeek 正在理解任务',detail:'还没有请求 QuickNode；模型请求最多等待约 60 秒。'}
+  case 'quote_requested':return {title:'正在等待 QuickNode 的 HTTP 402 报价',detail:'已经发送真实 POST 请求；此时没有签名或付款。'}
+  case 'quote_received':case 'risk_requested':return {title:'已拿到报价，正在查收款地址风险',detail:'正在等待 Intercepta；此时没有签名或付款。'}
+  case 'payment_requested':case 'final_risk':return {title:'签名前再次核对报价和风险',detail:'只有复核通过，才会使用 Agent 钱包签名。'}
+  case 'authorization_reserved':case 'payment_signed':return {title:'已签名，等待付款和数据结果',detail:'付款可能已发出；不要重新提交同一笔任务。'}
+  case 'candidate':case 'selection':return {title:'正在检查预算并完成任务',detail:'报价和风险结果已记录。'}
+  default:return {title:'正在执行任务',detail:'进度会显示在下方的执行记录中。'}
+ }
 })
 const canStartFresh=computed(()=>!initializing.value&&!active.value&&!pending.value&&!(task.value?.payment_attempted&&!task.value?.payment?.settled))
 const apiHeaders={'Content-Type':'application/json','X-Decision402':'local-ui'}
@@ -354,8 +379,8 @@ function newTask(){
  error.value=''
  mode.value='preview'
  policy.value={per_payment:'0.10',task_budget:'0.10',max_risk:0,preference:'price'}
- instruction.value='Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.'
- localStorage.removeItem('decision402-last')
+ instruction.value=taskPrompt
+ localStorage.removeItem('decision402-quicknode-last')
  history.replaceState(null,'',location.pathname)
 }
 function onModeChange(){if(mode.value!=='simulate')policy.value.max_risk=0}
@@ -363,7 +388,7 @@ async function getTask(id:string){
  const response=await fetch('/api/tasks/'+encodeURIComponent(id))
  if(!response.ok) throw new Error(response.status===404?'Task not found. You can retry the original request.':'Could not load the task')
  task.value=await response.json()
- if(!['queued','running'].includes(task.value!.status)){clearInterval(timer);pending.value=null;localStorage.removeItem('decision402-pending')}
+ if(!['queued','running'].includes(task.value!.status)){clearInterval(timer);pending.value=null;localStorage.removeItem('decision402-quicknode-pending')}
 }
 function watchTask(id:string){clearInterval(timer);timer=setInterval(()=>getTask(id).catch(e=>{error.value=e.message}),1500)}
 async function start(){
@@ -371,15 +396,17 @@ async function start(){
  try{
   // Retry an uncertain POST with the SAME immutable request ID and payload.
   if(!selectedAgent.value)throw new Error('Connect your wallet and create an agent first')
+  const taskText=pending.value?.instruction??instruction.value
+  if(!/base/i.test(taskText)||!/usdc/i.test(taskText)||[...taskText.matchAll(/0x[0-9a-fA-F]{40}/g)].length!==1)throw new Error('请在任务句子后面填写一个完整的钱包地址：0x 开头，后面 40 位十六进制字符。')
   const request=pending.value??{id:crypto.randomUUID(),agent_id:selectedAgent.value.id,instruction:instruction.value,mode:mode.value,policy:{...policy.value,max_risk:mode.value==='simulate'?policy.value.max_risk:0}}
-  pending.value=request;localStorage.setItem('decision402-pending',JSON.stringify(request));localStorage.setItem('decision402-last',request.id)
+  pending.value=request;localStorage.setItem('decision402-quicknode-pending',JSON.stringify(request));localStorage.setItem('decision402-quicknode-last',request.id)
   const response=await fetch('/api/tasks',{method:'POST',headers:apiHeaders,body:JSON.stringify(request)})
   const result=await response.json()
-  if(!response.ok){if(response.status<500){pending.value=null;localStorage.removeItem('decision402-pending')}throw new Error(result.error??'Could not create the task')}
+  if(!response.ok){if(response.status<500){pending.value=null;localStorage.removeItem('decision402-quicknode-pending')}throw new Error(result.error??'Could not create the task')}
   task.value=result
   history.replaceState(null,'','?task='+encodeURIComponent(request.id))
   if(['queued','running'].includes(result.status))watchTask(request.id)
-  else{pending.value=null;localStorage.removeItem('decision402-pending')}
+  else{pending.value=null;localStorage.removeItem('decision402-quicknode-pending')}
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed. Retry will use the same task ID.'}finally{sending.value=false}
 }
 onMounted(async()=>{
@@ -389,8 +416,8 @@ onMounted(async()=>{
  try{const r=await fetch('/api/config');if(!r.ok)throw new Error('Backend is not running');config.value=await r.json()
   const session=await fetch('/api/auth/me')
   if(session.ok){const current=await session.json();const accounts=window.ethereum?await window.ethereum.request({method:'eth_accounts'}) as string[]:[];if(accounts?.some(a=>a.toLowerCase()===current.owner.toLowerCase())){owner.value=current.owner;await fetchAgents()}}
-  const saved=localStorage.getItem('decision402-pending');if(saved)pending.value=JSON.parse(saved)
-  const id=new URLSearchParams(location.search).get('task')??localStorage.getItem('decision402-last');if(id && owner.value){await getTask(id);if(task.value){policy.value={...task.value.request.policy,max_risk:task.value.request.mode==='simulate'?task.value.request.policy.max_risk:0};mode.value=task.value.request.mode;instruction.value=task.value.request.instruction;agentID.value=task.value.request.agent_id??agentID.value}if(['queued','running'].includes(task.value?.status??''))watchTask(id)}
+  const saved=localStorage.getItem('decision402-quicknode-pending');if(saved)pending.value=JSON.parse(saved)
+  const id=new URLSearchParams(location.search).get('task')??localStorage.getItem('decision402-quicknode-last');if(id && owner.value){await getTask(id);if(task.value){policy.value={...task.value.request.policy,max_risk:task.value.request.mode==='simulate'?task.value.request.policy.max_risk:0};mode.value=task.value.request.mode;instruction.value=task.value.request.instruction;agentID.value=task.value.request.agent_id??agentID.value}if(['queued','running'].includes(task.value?.status??''))watchTask(id)}
  }catch(e){error.value=e instanceof Error?e.message:'Connection failed'}finally{initializing.value=false}
 })
 // The roller reads the scroll position directly; passive, because it never
@@ -422,7 +449,7 @@ onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(w
    <div class="onboard-title"><span class="eyebrow">YOUR AGENT WORKSPACE</span><h2>Give an agent its own wallet.</h2><p>Connect an owner wallet, create an agent, and fund its Base Sepolia test USDC wallet. Your agent pays only after the policy and risk checks pass.</p></div>
    <div class="onboard-grid">
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">01 / OWNER</span><h3>Connect MetaMask</h3><p>Sign a message to prove ownership. No transaction is sent at this step.</p><button class="onboard-button" :disabled="agentBusy" @click="connectWallet">{{owner?'Switch / reconnect':'Connect wallet'}} ↗</button><code v-if="owner">{{owner}}</code><button v-if="owner" class="ghost-button" @click="disconnectWallet">Lock wallets and disconnect</button></div><div class="onboard-shape tri" aria-hidden="true"></div></div>
-    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Tokyo buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label><label>Wallet password<input v-model="walletPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" placeholder="At least 12 characters" /></label><label>Repeat password<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label><label>Restore an encrypted wallet <small>optional; use the backup's password</small><input type="file" accept=".json,application/json" @change="selectBackup" /></label><small>Keep your password. We cannot reset it. A backup restores the wallet; enter the model key again if needed.</small></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':backupFile?'Restore wallet':'Create agent + wallet'}} ↗</button></div></div>
+    <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">02 / AGENT</span><h3>Create your buyer</h3><div class="onboard-fields"><label>Agent name<input v-model="agentName" maxlength="40" placeholder="Base data buyer" /></label><label>Model API URL<input v-model="modelURL" spellcheck="false" /></label><label>Model<Dropdown v-model="modelName" :options="[{value:'deepseek-flash',label:'DeepSeek Flash'},{value:'deepseek-v4-pro',label:'DeepSeek V4 Pro'}]" /></label><label>DeepSeek API key <small>optional if configured on server</small><input v-model="modelAPIKey" type="password" autocomplete="off" placeholder="Server default or your own key" /></label><label>Wallet password<input v-model="walletPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" placeholder="At least 12 characters" /></label><label>Repeat password<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label><label>Restore an encrypted wallet <small>optional; use the backup's password</small><input type="file" accept=".json,application/json" @change="selectBackup" /></label><small>Keep your password. We cannot reset it. A backup restores the wallet; enter the model key again if needed.</small></div><button class="onboard-button" :disabled="!owner || agentBusy" @click="createAgent">{{agentBusy?'Working…':backupFile?'Restore wallet':'Create agent + wallet'}} ↗</button></div></div>
     <div class="onboard-col"><div class="onboard-card"><span class="onboard-step">03 / FUND</span><h3>Fund the agent</h3><label v-if="agents.length">Choose agent<Dropdown v-model="agentID" @change="chooseAgent" :options="agents.map(a=>({value:a.id,label:a.name+' · '+shortAddress(a.wallet),short:a.name}))" /></label><div v-if="selectedAgent" class="agent-address"><small>AGENT WALLET · BASE SEPOLIA</small><code>{{selectedAgent.wallet}}</code><span>Balance: {{balance || '—'}} test USDC · gas: {{gasBalance || '—'}} test ETH</span></div><p v-else>Create an agent to get its deposit address.</p><label>Amount · test USDC<input v-model="fundAmount" inputmode="decimal" /></label><div class="onboard-actions"><button class="onboard-button" :disabled="!selectedAgent || funding" @click="fundAgent">{{funding?'Waiting for confirmation…':'Fund with MetaMask'}} ↗</button><button class="ghost-button" :disabled="!selectedAgent" @click="refreshBalance">Refresh balance</button></div><a v-if="fundTx" :href="'https://sepolia.basescan.org/tx/'+fundTx" target="_blank" rel="noopener noreferrer">View funding transaction ↗</a><p><button class="ghost-button" :disabled="!selectedAgent || funding" @click="fundWithdrawalGas">Send 0.001 test ETH for withdrawal gas</button></p><a v-if="gasTx" :href="'https://sepolia.basescan.org/tx/'+gasTx" target="_blank" rel="noopener noreferrer">View gas transaction ↗</a></div><div class="onboard-shape circle" :class="{away:rolling}" aria-hidden="true"></div></div>
    </div>
    <div v-if="selectedAgent" class="wallet-security">
@@ -450,12 +477,13 @@ onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(w
   <section class="ask">
    <form class="ask-field" @submit.prevent="start">
     <input v-model="instruction" maxlength="2000" :disabled="active || !!pending"
-      placeholder="What should the agent buy?" aria-label="What should the agent buy" />
+      placeholder="请通过 QuickNode 查询 Base 主网钱包的 USDC 余额，钱包地址：0x..." aria-label="要交给 Agent 的任务" />
     <button type="submit" :disabled="initializing || active || !config || !selectedAgent || blockedPayment || (walletLocked && (mode==='pay' || selectedAgent.has_model_key))">
      <span>{{active?'Working':pending?'Retry':mode==='pay'?'Authorize payment':'Send'}}</span>
      <i :class="{spinner:active}" aria-hidden="true">{{active?'':'→'}}</i>
     </button>
    </form>
+   <p class="hint">在上面这句话的末尾粘贴要查询的钱包地址（0x 开头，共 42 个字符），再点 Send。</p>
    <div class="ask-meta">
     <span v-if="!selectedAgent" class="ask-need">Create an agent above before sending a task.</span>
     <span v-else-if="walletLocked && (mode==='pay' || selectedAgent.has_model_key)">Unlock the agent wallet above before sending this task.</span><span v-else>Up to <b>{{policy.per_payment}}</b> USDC per payment · <b>{{policy.task_budget}}</b> total · risk &le; <b>{{policy.max_risk}}</b> · <b>{{policy.preference==='price'?'price first':'risk first'}}</b></span>
@@ -481,19 +509,20 @@ onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(w
         <em>{{m.spend}}</em>
        </label>
       </div>
+      <p class="hint">模拟：调用 DeepSeek，但报价和风险用假数据，不付款。预览：真查 QuickNode 报价和地址风险，不付款。测试网执行：复核后花 0.001 测试 USDC，取回真实余额。</p>
      </div>
      <div class="control-divider"><span>SPENDING LIMITS</span><span>USDC</span></div>
      <div class="row"><label>Per-payment cap<input v-model="policy.per_payment" inputmode="decimal" /></label><label>Total task budget<input v-model="policy.task_budget" inputmode="decimal" /></label></div>
      <div class="row"><label>Allowed risk<Dropdown v-model="policy.max_risk" :options="mode==='simulate'?[{value:0,label:'Level 0 only'},{value:1,label:'Levels 0 + 1'}]:[{value:0,label:'Level 0 only'}]" /></label><label>Selection priority<Dropdown v-model="policy.preference" :options="[{value:'price',label:'Lowest price first'},{value:'risk',label:'Lowest risk first'}]" /></label></div>
-     <p class="hint">High risk is always blocked. Level 0 means no detected signal, not guaranteed safety. Demo cap: 0.10 USDC.</p>
-     <div class="dataset-label"><span class="sample-icon">◈</span><div>Tokyo weather sample<small>Static demo data · one purchase per task</small></div></div>
+     <p class="hint">单笔上限和任务预算都要至少 0.001 USDC。风险等级 0 表示未查到风险，不是保证安全。现在只有 QuickNode 一家，选择优先级暂时不起作用。</p>
+     <div class="dataset-label"><span class="sample-icon">◈</span><div>Base mainnet USDC balance<small>QuickNode · live data · Base Sepolia test payment</small></div></div>
     </fieldset>
     <div v-if="mode==='pay'" class="pay-note">This action authorizes spending Base Sepolia test USDC under the policy above.</div>
     <p v-if="!selectedAgent" class="hint">Connect an owner wallet and create an agent to run a task.</p>
     <p v-if="blockedPayment" class="error">A previous payment has unconfirmed settlement. Reconcile it before another payment.</p>
     <p v-if="error" class="error" role="alert">{{error}}</p>
     <div class="model"><span><i></i>{{selectedAgent?.model_name??config?.model??'Connecting…'}}</span><small>Model calls use API credits</small></div>
-    <details class="scope-details"><summary>About this demo <span>+</span></summary><p>Four local endpoints serve the same static sample. In live modes, A/B share a known-risk fixture; C/D share a recipient with no detected risk signal. Level 1 is simulation-only. Unknown risk puts payment on hold.</p></details>
+    <details class="scope-details"><summary>About this demo <span>+</span></summary><p>Enter one Base mainnet wallet address in the task. QuickNode is the only connected seller. Preview reads a live quote and screens its payment address without paying. Pay spends Base Sepolia test USDC only if the quote, budget, and risk check pass. Simulation uses no external data.</p></details>
    </section>
 
    <section class="results">
@@ -502,35 +531,36 @@ onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(w
      <div class="flow-strip"><div v-for="(item,index) in flowSteps" :key="item.label" :class="{done:item.done,working:item.active}"><span class="flow-orb">{{item.done?'✓':''}}</span><b>{{item.label}}</b></div></div>
      <template v-if="task">
       <div class="run-policy"><span class="run-mode">{{taskModeLabel}}</span><span>≤ {{task.request.policy.per_payment}} / payment</span><span>≤ {{task.request.policy.task_budget}} total</span><span>Risk ≤ {{task.request.policy.max_risk}}</span><span>{{task.request.policy.preference==='price'?'Price first':'Risk first'}}</span></div>
-      <div v-if="task.candidates.length" class="decision-metrics"><div><strong>{{task.candidates.length}}</strong><span>offers evaluated</span></div><div><strong class="metric-blocked">{{excludedCount}}</strong><span>excluded by policy</span></div><div><strong class="metric-eligible">{{eligibleCount}}</strong><span>eligible options</span></div></div>
+      <div v-if="task.candidates.length" class="decision-metrics"><div><strong>{{task.candidates.length}}</strong><span>services checked</span></div><div><strong class="metric-blocked">{{excludedCount}}</strong><span>excluded by policy</span></div><div><strong class="metric-eligible">{{eligibleCount}}</strong><span>eligible services</span></div></div>
       <div v-if="task.candidates.length" class="candidate-list">
        <div class="candidate-head"><span>SERVICE / RECIPIENT</span><span>PRICE · USDC</span><span>RISK CHECK</span><span>DECISION</span></div>
        <article v-for="(c,ci) in task.candidates" :key="c.service.id" class="candidate"
         :style="{animationDelay:(ci*110)+'ms'}"
         :class="{chosen:task.selected?.service.id===c.service.id,
                  rejected:!!c.risk&&!c.eligible,
-                 screening:!c.risk,
+                 screening:!c.risk&&active,
                  settled:!!c.risk}">
         <div class="candidate-row">
-         <div class="provider"><span class="provider-avatar">{{c.service.id}}</span><div><b>Provider {{c.service.id}}</b><small>{{shortAddress(c.service.pay_to)}}</small></div></div>
+         <div class="provider"><span class="provider-avatar">{{c.service.id==='quicknode'?'QN':c.service.id}}</span><div><b>{{c.service.name}}</b><small>{{shortAddress(c.service.pay_to)}}</small></div></div>
          <div class="quote-price">{{money(c.quote?.amount??c.service.amount)}}</div>
-         <div class="risk-cell"><span class="risk-badge" :class="!c.risk?'checking':c.level<0?'unknown':c.level>=2?'high':c.level===1?'advisory':'clear'"><i></i>{{!c.risk?'Checking':c.level<0?'Unknown':c.level>=2?'Blocked':c.level===1?'Advisory':'No signal'}}</span><small>{{c.risk?.toxicScore!==undefined?'Score '+c.risk.toxicScore+'/100':'Level '+c.level+(task.request.mode==='simulate'?' · simulated':'')}}</small></div>
+         <div class="risk-cell"><span class="risk-badge" :class="!c.risk?(active?'checking':'unknown'):c.level<0?'unknown':c.level>=2?'high':c.level===1?'advisory':'clear'"><i></i>{{!c.risk?(active?'Checking':'Not checked'):c.level<0?'Unknown':c.level>=2?'Blocked':c.level===1?'Advisory':'No signal'}}</span><small>{{!c.risk?(c.quote?'Risk not checked':'No valid quote'):c.risk.toxicScore!==undefined?'Score '+c.risk.toxicScore+'/100':'Level '+c.level+(task.request.mode==='simulate'?' · simulated':'')}}</small></div>
          <div class="outcome"><span :class="c.eligible?'allow':'deny'">{{task.selected?.service.id===c.service.id?'✓ Selected':c.eligible?'Eligible':'× Excluded'}}</span></div>
         </div>
         <div class="candidate-reason"><span class="reason-mark">{{c.eligible?'↳':'⊘'}}</span><span>{{displayReason(c)}}</span></div>
         <details v-if="c.risk?.traits?.length" class="risk-details"><summary><span v-for="trait in c.risk.traits" :key="trait.name" class="trait-tag">{{traitLabel(trait.name)}}</span><span class="detail-link">View risk evidence ↗</span></summary><p v-for="trait in c.risk.traits" :key="trait.name">{{trait.description}}</p></details>
        </article>
       </div>
-      <div v-else class="empty loading-state"><span class="orbit" aria-hidden="true"></span><h3>Asking each provider to quote.</h3><p>Every recipient becomes known here, and not before.</p></div>
-      <div v-if="task.summary" class="answer" :class="{hasSelection:!!task.selected}"><div class="answer-top"><span>DECISION EXPLAINED</span><span>FILTER → RANK → EXECUTE</span></div><div v-if="task.selected" class="selection-headline"><span>Provider {{task.selected.service.id}}</span><b>{{money(task.selected.quote?.amount??task.selected.service.amount)}} <small>USDC</small></b></div><p>{{displaySummary}}</p></div>
+      <div v-else-if="active" class="empty loading-state"><span class="orbit" aria-hidden="true"></span><h3>{{progressInfo.title}}</h3><p>{{progressInfo.detail}}</p></div>
+      <div v-else class="empty"><h3>{{progressInfo.title}}</h3><p>{{progressInfo.detail}}</p></div>
+      <div v-if="task.summary" class="answer" :class="{hasSelection:!!task.selected}"><div class="answer-top"><span>DECISION EXPLAINED</span><span>FILTER → RANK → EXECUTE</span></div><div v-if="task.selected" class="selection-headline"><span>{{task.selected.service.name}}</span><b>{{money(task.selected.quote?.amount??task.selected.service.amount)}} <small>USDC</small></b></div><p>{{displaySummary}}</p></div>
       <p v-if="task.error" class="error" role="alert">{{task.error}}</p>
       <div v-if="task.payment" class="receipt" :class="{unconfirmed:!task.payment.settled}">
        <div class="receipt-top"><span class="receipt-check">{{task.payment.settled?'✓':'!'}}</span><div><b>{{task.payment.settled?'Settlement confirmed':'Settlement unconfirmed'}}</b><small>Base Sepolia · test USDC</small></div><a v-if="/^0x[0-9a-fA-F]{64}$/.test(task.payment.transaction??'')" :href="'https://sepolia.basescan.org/tx/'+task.payment.transaction" target="_blank" rel="noopener noreferrer">View transaction ↗</a></div>
        <p v-if="task.payment.error" class="error">{{task.payment.error}}</p>
-       <details v-if="task.payment.data" class="response-details"><summary>Returned sample data <span>+</span></summary><pre>{{JSON.stringify(task.payment.data,null,2)}}</pre></details>
+       <p v-if="task.payment.data?.balance_usdc" class="balance-result">{{task.payment.data.chain}} · {{task.payment.data.wallet_address}}<br /><strong>{{task.payment.data.balance_usdc}} USDC</strong></p><details v-if="task.payment.data" class="response-details"><summary>Returned data <span>+</span></summary><pre>{{JSON.stringify(task.payment.data,null,2)}}</pre></details>
       </div>
      </template>
-     <div v-else class="empty welcome-state"><div class="empty-art" aria-hidden="true"><span class="empty-ring"></span><span class="empty-core">↗</span><i class="satellite one">✓</i><i class="satellite two">×</i></div><div class="eyebrow">AUTONOMY WITH PERMISSION</div><h3>A clear reason for every payment.</h3><p>Set your limits and give the agent a task.<br>See which services qualify, which are blocked,<br>and why your policy chooses the next step.</p><div class="empty-legend"><span><i></i>Risk screening</span><span><i></i>Budget enforcement</span><span><i></i>Pre-signing check</span></div></div>
+     <div v-else class="empty welcome-state"><div class="empty-art" aria-hidden="true"><span class="empty-ring"></span><span class="empty-core">↗</span><i class="satellite one">✓</i><i class="satellite two">×</i></div><div class="eyebrow">AUTONOMY WITH PERMISSION</div><h3>Check a real wallet balance.</h3><p>Enter one Base mainnet wallet address.<br>Preview QuickNode's quote and risk check first.<br>Pay with Base Sepolia test USDC when ready.</p><div class="empty-legend"><span><i></i>Risk screening</span><span><i></i>Budget enforcement</span><span><i></i>Pre-signing check</span></div></div>
     </div>
     <div class="panel timeline">
      <div class="section-title"><div><h2>Execution trail</h2><p>The evidence behind the decision.</p></div><span class="event-count">{{task?.events.length??0}} EVENTS</span></div>
@@ -541,6 +571,6 @@ onUnmounted(()=>{clearInterval(timer);clearInterval(walletClock);clearInterval(w
   </main>
   <div v-show="rolling" class="roller" aria-hidden="true"
     :style="{transform:'translate3d('+rollX+'px,'+rollY+'px,0) rotate('+rollSpin+'deg)'}"></div>
-   <footer><a href="/" class="footer-brand">Decision402<span>Designed for delegated decisions.</span></a><span>Local prototype · Model has no private key · Static sample data</span></footer>
+   <footer><a href="/" class="footer-brand">Decision402<span>Designed for delegated decisions.</span></a><span>Local prototype · Model has no private key · Live Base mainnet data</span></footer>
  </div>
 </template>

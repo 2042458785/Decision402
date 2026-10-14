@@ -151,16 +151,16 @@ func TestPayFinalGateAndReceipt(t *testing.T) {
 }
 func TestJournalAndRequestIsolation(t *testing.T) {
 	dir := t.TempDir()
-	a, err := NewApp("127.0.0.1:8080", dir, NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", dir, NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := TaskRequest{ID: "test-task-00000001", Instruction: "Tokyo weather", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
+	request := TaskRequest{ID: "test-task-00000001", Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
 	task := &Task{Request: request, Status: "running", PaymentAttempted: true}
 	if a.persist(task) != nil {
 		t.Fatal("persist failed")
 	}
-	recovered, err := NewApp(a.host, dir, a.model, a.scanner, testPayTo, testRisk)
+	recovered, err := NewApp(a.host, dir, a.model, a.scanner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestAgentLoopSimulationAndDuplicateExecute(t *testing.T) {
 		turn := requests.Add(1)
 		var msg any
 		if turn == 1 {
-			msg = map[string]any{"role": "assistant", "content": "", "tool_calls": []any{map[string]any{"id": "a", "type": "function", "function": map[string]string{"name": "find_services", "arguments": `{"city":"Tokyo"}`}}}}
+			msg = map[string]any{"role": "assistant", "content": "", "tool_calls": []any{map[string]any{"id": "a", "type": "function", "function": map[string]string{"name": "find_services", "arguments": `{"address":"0x3333333333333333333333333333333333333333"}`}}}}
 		} else if turn == 2 {
 			calls := []any{}
 			for _, id := range []string{"b", "c"} {
@@ -196,15 +196,15 @@ func TestAgentLoopSimulationAndDuplicateExecute(t *testing.T) {
 	}))
 	defer modelServer.Close()
 	scanner := &scannerStub{action: "allow"}
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", modelServer.URL), scanner, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", modelServer.URL), scanner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := TaskRequest{ID: "test-task-00000002", Instruction: "Tokyo weather", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
+	request := TaskRequest{ID: "test-task-00000002", Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
 	a.tasks[request.ID] = &Task{Request: request, Status: "queued"}
 	a.run(request)
 	task := a.tasks[request.ID]
-	if task.Status != "previewed" || task.Selected.Service.ID != "C" || task.PaymentAttempted || scanner.calls != 0 || !strings.Contains(task.Summary, "Policy simulation") || !strings.Contains(task.Summary, "Screening:") || requests.Load() != 2 {
+	if task.Status != "previewed" || task.Selected.Service.ID != "quicknode" || task.PaymentAttempted || scanner.calls != 0 || !strings.Contains(task.Summary, "Policy simulation") || !strings.Contains(task.Summary, "Screening:") || requests.Load() != 2 {
 		t.Fatalf("unexpected simulated execution %+v", task)
 	}
 	count := 0
@@ -231,11 +231,11 @@ func TestModelErrorDoesNotExposeCredential(t *testing.T) {
 }
 
 func TestDuplicateTaskAndChangedAuthorization(t *testing.T) {
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := TaskRequest{ID: "test-task-00000003", Instruction: "Tokyo weather", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
+	request := TaskRequest{ID: "test-task-00000003", Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "simulate", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: "price"}}
 	a.tasks[request.ID] = &Task{Request: request, Status: "previewed", Summary: "existing result"}
 	for _, change := range []bool{false, true} {
 		input := request
@@ -259,17 +259,27 @@ func TestDuplicateTaskAndChangedAuthorization(t *testing.T) {
 	}
 }
 
-func TestOptionalLowRiskRecipientIsDistinct(t *testing.T) {
-	low := "0x3333333333333333333333333333333333333333"
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, low)
+func TestQuickNodeIsOnlyConfiguredService(t *testing.T) {
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.services[2].PayTo != low || a.services[3].PayTo != testPayTo {
-		t.Fatalf("C/D recipients not separated: %+v", a.services)
+	if len(a.services) != 1 || a.services[0].ID != "quicknode" || a.services[0].URL != quickNodeURL || a.services[0].Amount != quickNodePrice {
+		t.Fatalf("unexpected services: %+v", a.services)
 	}
-	if _, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{}, testPayTo, testRisk, testRisk); err == nil {
-		t.Fatal("reused risk fixture must fail")
+}
+
+func TestUnsupportedTaskIsRejectedBeforeRunning(t *testing.T) {
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), &scannerStub{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := TaskRequest{ID: "unsupported-task-001", Instruction: "Check this address", Mode: "preview", Policy: Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}}
+	data, _ := json.Marshal(request)
+	w := httptest.NewRecorder()
+	a.createTask(w, httptest.NewRequest("POST", "/api/tasks", strings.NewReader(string(data))))
+	if w.Code != 400 || len(a.tasks) != 0 {
+		t.Fatalf("unsupported task should be rejected without starting: status=%d tasks=%d", w.Code, len(a.tasks))
 	}
 }
 
@@ -281,46 +291,69 @@ func (s *fixtureScanner) Screen(_ context.Context, address string) probe.Decisio
 	return s.decisions[address]
 }
 
-func TestLivePreviewRanksScreenedRecipients(t *testing.T) {
-	low := "0x3333333333333333333333333333333333333333"
-	zero, ten, hundred := 0, 10, 100
+func TestLivePreviewReadsPOSTQuoteAndScreensRecipient(t *testing.T) {
+	zero := 0
 	scanner := &fixtureScanner{decisions: map[string]probe.Decision{
-		testRisk:  {Action: "deny", Level: 2, Address: testRisk, ToxicScore: &hundred, Reason: "known malicious"},
-		low:       {Action: "allow", Level: 1, Address: low, ToxicScore: &zero, Traits: []probe.Trait{{Risk: &ten, Name: "reviewed_advisory", Description: "minor exposure"}}},
-		testPayTo: {Action: "allow", Level: 0, Address: testPayTo, ToxicScore: &zero},
+		quickNodePayTo: {Action: "allow", Level: 0, Address: quickNodePayTo, ToxicScore: &zero},
 	}}
-	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), scanner, testPayTo, testRisk, low)
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", "https://api.deepseek.com"), scanner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]Service{}
-	for _, service := range a.services {
-		byID[service.ID] = service
-	}
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/data"), "/services/")
-		service, ok := byID[id]
-		if !ok {
-			w.WriteHeader(404)
-			return
+		requests.Add(1)
+		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("wrong request: %s %s", r.Method, r.Header.Get("Content-Type"))
 		}
-		q := *testQuote(service.Amount)
-		q.PayTo = service.PayTo
-		body, _ := json.Marshal(types.PaymentRequired{X402Version: 2, Accepts: []types.PaymentRequirements{q}})
-		w.Header().Set("PAYMENT-REQUIRED", base64.StdEncoding.EncodeToString(body))
+		var body struct {
+			Method string            `json:"method"`
+			Params []json.RawMessage `json:"params"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Method != "eth_call" || len(body.Params) != 2 {
+			t.Errorf("wrong JSON-RPC body: %+v", body)
+		}
+		large := *testQuote("1000000")
+		large.PayTo = quickNodePayTo
+		exact := *testQuote(quickNodePrice)
+		exact.PayTo = quickNodePayTo
+		gateway := *testQuote("100")
+		gateway.PayTo = quickNodePayTo
+		gateway.Extra = map[string]interface{}{"name": "GatewayWalletBatched", "version": "1"}
+		b, _ := json.Marshal(types.PaymentRequired{X402Version: 2, Accepts: []types.PaymentRequirements{large, exact, gateway}})
+		w.Header().Set("PAYMENT-REQUIRED", base64.StdEncoding.EncodeToString(b))
 		w.WriteHeader(402)
 	}))
 	defer server.Close()
-	for i := range a.services {
-		a.services[i].URL = server.URL + "/services/" + a.services[i].ID + "/data"
-	}
+	a.services[0].URL = server.URL
 	id := "test-live-preview-0001"
 	a.tasks[id] = &Task{Request: TaskRequest{ID: id}, Status: "running"}
-	for _, tc := range []struct{ preference, want string }{{"price", "C"}, {"risk", "D"}} {
-		policy := Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 1, Preference: tc.preference}
-		candidates, selected := a.discover(context.Background(), id, "preview", policy)
-		if selected == nil || selected.Service.ID != tc.want || candidates[0].Level != 2 || candidates[1].Level != 2 || candidates[2].Level != 1 || candidates[3].Level != 0 {
-			t.Fatalf("preference=%s selected=%+v candidates=%+v", tc.preference, selected, candidates)
+	policy := Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}
+	candidates, selected := a.discover(context.Background(), id, "preview", policy, "0x3333333333333333333333333333333333333333")
+	if selected == nil || selected.Service.ID != "quicknode" || selected.Quote.Amount != quickNodePrice || len(candidates) != 1 || candidates[0].Level != 0 || requests.Load() != 1 {
+		t.Fatalf("unexpected preview: selected=%+v candidates=%+v requests=%d", selected, candidates, requests.Load())
+	}
+}
+
+func TestModelCannotSubstituteWalletAddress(t *testing.T) {
+	var turns atomic.Int32
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if turns.Add(1) == 1 {
+			json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "a", "type": "function", "function": map[string]string{"name": "find_services", "arguments": `{"address":"0x4444444444444444444444444444444444444444"}`}}}}}}})
+			return
 		}
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "Unsupported address."}}}})
+	}))
+	defer modelServer.Close()
+	a, err := NewApp("127.0.0.1:8080", t.TempDir(), NewModel("test", "test", modelServer.URL), &scannerStub{action: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := TaskRequest{ID: "model-address-test-01", Instruction: "Check Base mainnet USDC balance for 0x3333333333333333333333333333333333333333", Mode: "simulate", Policy: Policy{PerPayment: "0.01", TaskBudget: "0.01", MaxRisk: 0, Preference: "price"}}
+	a.tasks[req.ID] = &Task{Request: req, Status: "queued"}
+	a.run(req)
+	result := a.tasks[req.ID]
+	if len(result.Candidates) != 0 || result.PaymentAttempted || result.Selected != nil {
+		t.Fatalf("model changed target: %+v", result)
 	}
 }

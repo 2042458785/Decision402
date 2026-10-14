@@ -238,3 +238,14 @@ func TestConfigValidationAndPrecedence(t *testing.T) {
 		t.Fatal("parse error must not echo secret lines")
 	}
 }
+
+func TestAgentConfigDoesNotRequireOldWeatherFixtures(t *testing.T) {
+	for _, name := range []string{"INTERCEPTA_API_KEY", "INTERCEPTA_NORMAL_ADDRESS", "INTERCEPTA_RISK_ADDRESS", "INTERCEPTA_LOW_RISK_ADDRESS"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("INTERCEPTA_API_KEY", "test-key")
+	cfg, err := LoadAgentConfig(filepath.Join(t.TempDir(), ".env"))
+	if err != nil || cfg.APIKey != "test-key" {
+		t.Fatalf("agent config: %+v, %v", cfg, err)
+	}
+}

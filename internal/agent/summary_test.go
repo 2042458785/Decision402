@@ -30,3 +30,13 @@ func TestSelectionSummaryShowsNoEligibleService(t *testing.T) {
 		t.Fatalf("expected no eligible service, got %+v", selected)
 	}
 }
+
+func TestSelectionSummaryWithOneService(t *testing.T) {
+	p := Policy{PerPayment: "0.1", TaskBudget: "0.1", MaxRisk: 0, Preference: "price"}
+	candidates, selected := Rank(p, []Candidate{{Service: Service{ID: "quicknode"}, Level: 0, Quote: testQuote("1000")}})
+	got := selectionSummary(p, candidates, selected)
+	want := "Screening: quicknode eligible. Selection: quicknode is the only connected service (0.001 USDC)."
+	if got != want {
+		t.Fatalf("summary=%q, want %q", got, want)
+	}
+}

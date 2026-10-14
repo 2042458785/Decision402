@@ -65,7 +65,7 @@ func (s *withdrawalChainStub) Close() {}
 
 func TestWithdrawalIsOwnerOnlyAndIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tasks")
-	a, err := NewApp("127.0.0.1:8080", dir, NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"}, testPayTo, testRisk)
+	a, err := NewApp("127.0.0.1:8080", dir, NewModel("server-key", "deepseek-flash", "https://api.deepseek.com"), &scannerStub{action: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestWithdrawalIsOwnerOnlyAndIdempotent(t *testing.T) {
 	if other.Code != 409 {
 		t.Fatalf("new withdrawal while pending: %d", other.Code)
 	}
-	reloaded, err := NewApp(a.host, dir, a.model, a.scanner, testPayTo, testRisk)
+	reloaded, err := NewApp(a.host, dir, a.model, a.scanner)
 	if err != nil || reloaded.withdrawals["withdraw-attempt-0001"].Transaction != tx.Hash().Hex() {
 		t.Fatalf("withdrawal journal did not reload: %v", err)
 	}

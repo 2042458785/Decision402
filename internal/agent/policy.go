@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -57,11 +58,14 @@ func (p Policy) Validate() error {
 }
 
 type Service struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	URL    string `json:"url"`
-	PayTo  string `json:"pay_to"`
-	Amount string `json:"amount"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	URL           string          `json:"url"`
+	Method        string          `json:"method,omitempty"`
+	Body          json.RawMessage `json:"body,omitempty"`
+	TargetAddress string          `json:"target_address,omitempty"`
+	PayTo         string          `json:"pay_to"`
+	Amount        string          `json:"amount"`
 }
 type Candidate struct {
 	Service  Service                    `json:"service"`
@@ -130,7 +134,9 @@ func Rank(p Policy, candidates []Candidate) ([]Candidate, *Candidate) {
 		return out, nil
 	}
 	winner := options[0]
-	if p.Preference == "price" {
+	if len(options) == 1 {
+		winner.Reason = "Only eligible service"
+	} else if p.Preference == "price" {
 		winner.Reason = "Lowest-priced eligible service; risk breaks price ties"
 	} else {
 		winner.Reason = "Lowest-risk eligible service; price breaks risk ties"

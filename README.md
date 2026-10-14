@@ -16,9 +16,9 @@
 
 改进和测试记录 / Changes and tests: [钱包改进 / Wallet changes](NextToDo/Version/V2.0/WhatWeImprove/Wallet/Wallet.md).
 
-现已接入 **DeepSeek + Go 策略引擎 + Intercepta + x402 + Vue3 页面**。一个进程提供页面和四个本地演示服务，不再需要分别启动 serve。
+现已接入 **DeepSeek + Go 策略引擎 + Intercepta + x402 + Vue3 页面**。Agent 现在通过 QuickNode 查询 Base 主网钱包的真实 USDC 余额，付款用 Base Sepolia 测试 USDC。
 
-**DeepSeek, a Go policy engine, Intercepta, x402, and a Vue3 UI** are connected. A single process hosts the UI and four local demo services.
+**DeepSeek, a Go policy engine, Intercepta, x402, and a Vue3 UI** are connected. The Agent now asks QuickNode for a real Base mainnet USDC balance and pays with Base Sepolia test USDC.
 
 ### 开始之前 / Before you start
 
@@ -52,8 +52,7 @@ faucets and neither has any real value. The Agent wallet also needs test ETH to 
 git clone https://github.com/2042458785/Decision402.git
 cd Decision402
 
-# Configuration. The app will not start without an Intercepta API key:
-# screening every recipient is the product, so it refuses to run blind.
+# Configuration. The app needs an Intercepta API key to screen the seller before signing.
 cp .env.example .env
 #   INTERCEPTA_API_KEY   sandbox key from https://intercepta.io/ethglobal
 # Open .env and configure Intercepta.
@@ -68,13 +67,15 @@ One process serves the interface and the API together on
 **http://127.0.0.1:8080** — there is no separate backend to deploy or
 connect.
 
-打开 **http://127.0.0.1:8080**，先完成上面的钱包和 Agent 设置。**比赛主演示**：单次与任务上限均设 `0.10` USDC、只允许等级 `0`、价格优先；输入英文任务“Get a sample Tokyo weather dataset. Choose a service using my budget and risk policy.”先运行“Live API preview · No payment”，确认 A/B 被阻断、C 被选中，再运行“Live testnet execution · Pays automatically”展示签名前复查与 Base Sepolia 回执。C 的报价是 `0.01` 测试 USDC。策略模拟只是额外说明偏好取舍，不能代替真实赞助商 API 证据。模型调用会消耗 DeepSeek 额度。
+打开 **http://127.0.0.1:8080**，连接 MetaMask、创建 Agent，并给 Agent 充值 Base Sepolia 测试 USDC。输入任务，例如 `Check the Base mainnet USDC balance for 0x...`，把 `0x...` 换成完整的 40 位地址。先选 Preview：程序向 QuickNode 发送 `eth_call`，读取 HTTP 402 报价，再用 Intercepta 检查收款地址，**不会付款**。要真实调用，再解锁 Agent，选 Pay；单笔和任务上限都至少设 `0.001` USDC。付款后页面显示该地址的真实主网 USDC 余额。风险结果查不到或不通过时，程序不会签名。
 
-Open **http://127.0.0.1:8080** and complete wallet/agent setup first. **Main judging demo:** set both caps to `0.10` USDC, allow only level `0`, and choose price-first. Ask for the Tokyo sample weather dataset under the page policy. Run Live API Preview first (no payment): A/B are blocked and C is selected. Then run Testnet Execution to show the final pre-signing scan and Base Sepolia receipt for C's `0.01` test-USDC quote. Simulation is optional and is not evidence of live sponsor screening. Model calls consume DeepSeek API credit.
+Open **http://127.0.0.1:8080**, connect MetaMask, create an Agent, and fund it with Base Sepolia test USDC. Ask `Check the Base mainnet USDC balance for 0x...`, replacing `0x...` with one full 40-hex-character address. Preview sends `eth_call` to QuickNode, reads its HTTP 402 offer, and screens the recipient with Intercepta **without paying**. For a paid call, unlock the Agent and choose Pay with both caps at or above `0.001` USDC. The result shows the address's real Base mainnet USDC balance. Missing or blocked risk data stops the signature.
 
-完整的中英操作说明、模块职责、执行流程和限制：[第四步 Agent 指南](docs/step4-agent.md)。实测证据：[第四步验证记录](docs/step4-validation.md)。**当前真实演示只用已验证的两类结果：A/B 风险地址被阻断，Agent 改选本次扫描未检出风险且在预算内的 C。等级 1 的价格／风险取舍仅在标明的模拟模式展示。**
+QuickNode 是当前唯一接入的真实服务商。程序只接受其 Base Sepolia 逐次付款报价：`0.001` 测试 USDC；其它预充值、Gateway 或主网付款选项会被排除。收款地址固定为本次实查报价中的地址；QuickNode 若更换地址，付款会停止，需要重新核实后更新配置。这里没有第二家可自动切换。
 
-For bilingual instructions, architecture, and limitations, see the [Step 4 guide](docs/step4-agent.md) and [validation record](docs/step4-validation.md). **The live demo uses the verified binary path: risky A/B are blocked and the agent selects affordable C after no risk signal is detected. The level-1 price/risk trade-off remains explicitly simulated.**
+QuickNode is the only connected live seller. The app accepts only its Base Sepolia pay-per-request offer of `0.001` test USDC. Credit bundles, Gateway, and mainnet payment offers are excluded. The recipient is pinned to the address observed in a live quote; if QuickNode changes it, payment stops until it is verified and updated. There is no second seller to fall back to yet.
+
+[QuickNode x402 说明](https://www.quicknode.com/docs/build-with-ai/x402-payments) · [Base `eth_call` 文档](https://www.quicknode.com/docs/base/eth_call) · [Circle 公布的 Base 主网 USDC 合约](https://developers.circle.com/stablecoins/usdc-contract-addresses)。旧版东京天气演示保留在独立 CLI `cmd/x402-demo` 和 V1.0 历史文档中；主页面不再使用它。
 
 以下是仍可独立使用的扫描和 CLI 演示说明。
 

@@ -26,7 +26,12 @@ var traitNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // LoadConfig reads a deliberately small dotenv format, without executing shell
 // code or expanding variables. Process environment overrides the local file.
-func LoadConfig(path string) (Config, error) {
+func LoadConfig(path string) (Config, error) { return loadConfig(path, true) }
+
+// LoadAgentConfig needs screening credentials, not the old local seller fixtures.
+func LoadAgentConfig(path string) (Config, error) { return loadConfig(path, false) }
+
+func loadConfig(path string, requireFixtures bool) (Config, error) {
 	values := make(map[string]string)
 	f, err := os.Open(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -78,15 +83,17 @@ func LoadConfig(path string) (Config, error) {
 	if strings.ContainsAny(cfg.APIKey, " \t\r\n") {
 		return Config{}, errors.New("INTERCEPTA_API_KEY contains whitespace; check the saved key")
 	}
-	if !addressPattern.MatchString(cfg.NormalAddress) || !addressPattern.MatchString(cfg.RiskAddress) {
-		return Config{}, errors.New("set INTERCEPTA_NORMAL_ADDRESS and INTERCEPTA_RISK_ADDRESS to sponsor-provided 0x + 40 hex mainnet addresses")
-	}
-	if strings.EqualFold(cfg.NormalAddress, cfg.RiskAddress) {
-		return Config{}, errors.New("normal and risk fixtures must be different addresses")
-	}
-	if cfg.LowRiskAddress != "" {
-		if !addressPattern.MatchString(cfg.LowRiskAddress) || strings.EqualFold(cfg.LowRiskAddress, cfg.NormalAddress) || strings.EqualFold(cfg.LowRiskAddress, cfg.RiskAddress) {
-			return Config{}, errors.New("INTERCEPTA_LOW_RISK_ADDRESS must be a distinct valid 0x address you control on the payment testnet")
+	if requireFixtures {
+		if !addressPattern.MatchString(cfg.NormalAddress) || !addressPattern.MatchString(cfg.RiskAddress) {
+			return Config{}, errors.New("set INTERCEPTA_NORMAL_ADDRESS and INTERCEPTA_RISK_ADDRESS to sponsor-provided 0x + 40 hex mainnet addresses")
+		}
+		if strings.EqualFold(cfg.NormalAddress, cfg.RiskAddress) {
+			return Config{}, errors.New("normal and risk fixtures must be different addresses")
+		}
+		if cfg.LowRiskAddress != "" {
+			if !addressPattern.MatchString(cfg.LowRiskAddress) || strings.EqualFold(cfg.LowRiskAddress, cfg.NormalAddress) || strings.EqualFold(cfg.LowRiskAddress, cfg.RiskAddress) {
+				return Config{}, errors.New("INTERCEPTA_LOW_RISK_ADDRESS must be a distinct valid 0x address you control on the payment testnet")
+			}
 		}
 	}
 	if cfg.AddressSource == "" {
